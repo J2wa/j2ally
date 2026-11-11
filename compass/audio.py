@@ -25,7 +25,7 @@ def audio_module():
         raise CoachError("Windows audio component missing. Run Setup.cmd again.") from exc
 
 
-def list_devices() -> list[dict]:
+def list_devices(source="system") -> list[dict]:
     pa = audio_module()
     result = []
     with pa.PyAudio() as p:
@@ -41,7 +41,7 @@ def list_devices() -> list[dict]:
             if int(info.get("maxInputChannels", 0)) < 1:
                 continue
             loopback = bool(info.get("isLoopbackDevice"))
-            if not loopback:
+            if loopback != (source == "system"):
                 continue
             result.append({
                 "index": int(info["index"]), "name": info["name"],
@@ -51,6 +51,10 @@ def list_devices() -> list[dict]:
                 "default": int(info["index"]) == (default_loop if loopback else default_mic),
             })
     return sorted(result, key=lambda d: (not d["loopback"], not d["default"], d["name"]))
+
+
+def list_microphones():
+    return list_devices("microphone")
 
 
 def deepgram_url(config: ApiConfig, device: dict) -> str:
@@ -122,7 +126,8 @@ class LiveSession:
     Test and live modes use this identical audio/transport path.
     """
 
-    def __init__(self, config: ApiConfig, device: dict, emit, duration: float | None = None):
+    def __init__(self, config: ApiConfig, device: dict, emit, duration: float | None = None, *, source="system"):
+        self.source = source
         self.config, self.device, self.emit = config, device, emit
         self.duration = duration
         self.stop_event = threading.Event()
@@ -132,8 +137,12 @@ class LiveSession:
         self.stop_event.set()
 
     def run(self) -> str:
-        if not self.device.get("loopback"):
+        if self.source not in ("system", "practice_microphone"):
+            raise CoachError("Unknown audio source.")
+        if self.source == "system" and not self.device.get("loopback"):
             raise CoachError("ALLY captures system audio only. Choose your meeting's speaker/headphone output.")
+        if self.source == "practice_microphone" and self.device.get("loopback"):
+            raise CoachError("Practice recording requires a microphone, not system audio.")
         if not self.config.deepgram_key.strip():
             raise CoachError("Paste your Deepgram API key first.")
         parser = Utterances()

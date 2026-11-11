@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QTextBrowser, QVBoxLayout, QWidget, QSlider, QSpinBox,
 )
 
+from .practice_ui import PracticePage
 from .turns import TurnGate, SPEEDS, adaptive_wait, is_question
 from .transport import Cancellation, GeminiTransport
 from .latency import LatencyLog
@@ -225,7 +226,7 @@ class MainWindow(QMainWindow):
         side.addSpacing(25)
         self.nav = []
         self.stack = QStackedWidget()
-        for i, text in enumerate(("01   API & audio", "02   Your context", "03   Live coach")):
+        for i, text in enumerate(("01   API & audio", "02   Your context", "03   Live coach", "04   Practice")):
             nav = button(text, lambda checked=False, index=i: self.go(index))
             nav.setObjectName("nav")
             nav.setCheckable(True)
@@ -268,6 +269,13 @@ class MainWindow(QMainWindow):
         self.make_setup()
         self.make_context()
         self.make_coach()
+        self.practice = PracticePage(self.config, lambda: (self.resume.toPlainText(), self.job.toPlainText()),
+                                     self.transport, lambda: not (self.session or self.test_session or self.busy), self)
+        self.practice.changed.connect(self.update_ready)
+        practice_scroll = QScrollArea()
+        practice_scroll.setWidgetResizable(True)
+        practice_scroll.setWidget(self.practice)
+        self.stack.addWidget(practice_scroll)
         self.auto.setChecked(True)
 
     def page(self, title, description, scroll=True):
@@ -550,13 +558,14 @@ class MainWindow(QMainWindow):
         source_ready = bool(device and device.get("loopback") and config.deepgram_key)
         audio_busy = bool(self.session or self.test_session or "devices" in self.busy)
         testing = "google_test" in self.busy or "audio_test" in self.busy
-        self.start_btn.setEnabled(source_ready and google_ready and context and self.consent.isChecked() and not audio_busy and not testing and not self.capturing)
+        practice_active = hasattr(self, "practice") and (self.practice.active or self.practice.microphone is not None)
+        self.start_btn.setEnabled(not practice_active and source_ready and google_ready and context and self.consent.isChecked() and not audio_busy and not testing and not self.capturing)
         self.start_btn.setText("Start coach" if tests else "Test + start coach")
-        self.ask_btn.setEnabled(context and google_ready and "answer" not in self.busy and not self.capturing)
-        self.screenshot_btn.setEnabled(context and google_ready and "answer" not in self.busy and not self.capturing)
-        self.google_test_btn.setEnabled(bool(config.google_key and config.google_model) and "google_test" not in self.busy and not self.session)
-        self.models_btn.setEnabled(bool(config.google_key) and "models" not in self.busy and not self.session)
-        self.audio_test_btn.setEnabled(bool(config.deepgram_key and device) and not audio_busy)
+        self.ask_btn.setEnabled(not practice_active and context and google_ready and "answer" not in self.busy and not self.capturing)
+        self.screenshot_btn.setEnabled(not practice_active and context and google_ready and "answer" not in self.busy and not self.capturing)
+        self.google_test_btn.setEnabled(not practice_active and bool(config.google_key and config.google_model) and "google_test" not in self.busy and not self.session)
+        self.models_btn.setEnabled(not practice_active and bool(config.google_key) and "models" not in self.busy and not self.session)
+        self.audio_test_btn.setEnabled(not practice_active and bool(config.deepgram_key and device) and not audio_busy)
         self.refresh_btn.setEnabled(not audio_busy)
         self.cancel_btn.setEnabled("answer" in self.busy or (self.speculative and not self.confirmed and self.held_result is not None))
         # Freeze audio credentials and source during tests/sessions; answer settings during sessions.
@@ -1213,6 +1222,7 @@ class MainWindow(QMainWindow):
         if "--latency-report" in sys.argv:
             print(self.latency.dumps(), flush=True)
         self.closed = True
+        self.practice.shutdown()
         self.render_timer.stop()
         self.spec_timer.stop()
         self.answer_viewport.removeEventFilter(self)
