@@ -25,7 +25,7 @@ def start_mocked(window, app, monkeypatch):
 def test_practice_full_typed_flow_and_summary(window, app, monkeypatch):
     page = start_mocked(window, app, monkeypatch)
     window.go(3)
-    assert window.stack.count() == 4
+    assert window.stack.count() == 5
     assert not window.start_btn.isEnabled()  # microphone/live modes cannot overlap
     for i in range(3):
         assert f'Question {i + 1}/3' in page.question.text()

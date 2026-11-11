@@ -283,7 +283,7 @@ def test_layout_modes_and_small_window(window, app):
     from PySide6.QtCore import Qt
     window.go(2)
     window.resize(720, 650)
-    app.processEvents()
+    pump(app, lambda: window.coach_splitter.orientation() == Qt.Orientation.Vertical)
     assert window.width() == 720
     assert window.sidebar.isHidden()
     assert window.coach_splitter.orientation() == Qt.Orientation.Vertical

@@ -75,7 +75,7 @@ class PracticePage(QWidget):
         self.question = QLabel("Your first question will appear here.")
         self.question.setWordWrap(True)
         self.question.setTextFormat(Qt.TextFormat.PlainText)
-        self.question.setStyleSheet("font-size: 22px; padding: 14px; background: #18283f; border-radius: 8px;")
+        self.question.setObjectName("practiceQuestion")
         layout.addWidget(self.question)
         row = QHBoxLayout()
         self.read_button = self.button("Read question aloud", self.read_question, row)

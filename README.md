@@ -137,3 +137,29 @@ Each answer receives a **1–5 score**, **two strengths**, **two improvements**,
 **Cancel session** stops requests, recording and speech and discards late results. Gemini calls have 5-second connect / 15-second read timeouts plus a 45-second overall UI/worker deadline. No automatic retries are made for questions, scoring or microphone streams. After errors/timeouts the draft answer is retained; another manual submission is another billable request. Server billing can continue after client cancellation.
 
 Practice reads API keys currently in memory; it adds no separate key store or disk copies. Existing opt-in DPAPI **Remember API keys** remains controlled under **API & audio**. Practice context snapshots, answers, feedback and scores stay in memory; starting another session replaces them. No audio/session files or telemetry are written. Tests mock Gemini/Deepgram and cover JSON parsing, evidence checks, session state, microphone isolation, cancellation/timeouts and the full typed-session/summary UI flow. Windows drivers and installed SAPI playback still require real-device verification.
+
+## UI and reading controls
+
+Answers now render Markdown as they stream (headings, bold text, lists and monospaced fenced code). Each code block has a **Copy code** link; the toolbar also provides a block selector and **Copy code** button. Code is never executed. **Key points first** enlarges the existing opening and moves an existing Key points section ahead of details; it does not ask Gemini for extra content or change the prompt. Native Qt Markdown parsing is used, with raw HTML and resource loading disabled.
+
+**Previous / Next** and the answer list keep the reading history for this app run. A new request updates a separate history entry and leaves the answer you are reading in place; **Jump to latest** selects the newest entry. Scrolling upward pauses streaming auto-scroll; Jump to latest resumes it. Cancelled speculative text is discarded, and cancelled entries are labelled. History is kept in memory and is not silently added to settings or to the prompt. Existing note export continues to export confirmed answers.
+
+The transcript groups final segments into timestamped visual turns, dims interim text, and marks the turn associated with the selected answer. **Re-ask this turn** uses the existing manual answer path (and makes a billable request when ready). The multi-line question field remains editable; its badge identifies a detected question or a draft being edited. As before, incoming speech does not overwrite a focused, nonempty draft.
+
+The single bottom status strip shows listening, audio level, Deepgram/Gemini state, answer state and latency. “Ready” means a successful test/request, not a background connectivity guarantee. Errors appear in a non-blocking banner with **Fix →** opening the relevant Settings section. Destructive clear/close confirmations remain dialogs.
+
+Use **View → Auto layout / Side by side / Stacked / Focus**, **Compact mode**, or **Mini bar**. Mini bar contains the latest answer and listening state; **Full window ↗** restores the normal workspace. The searchable **Settings** page groups API & audio, Your context, Coaching, Appearance and Privacy; API/context sections link to their full editors. Appearance offers **Light, Dark, High contrast, Follow Windows**, a font picker, 16–32 px answer text and 25–100% opacity. Preferences are saved by Save settings or on close. All colors and document styles live in `compass/themes.py` and are applied through QSS/palette. Qt native color/contrast preferences are followed; reduced motion and High contrast disable the subtle 100 ms sidebar transition. Resize updates are coalesced, and always-on-top restores geometry, state, opacity and capture affinity.
+
+No dependencies were added and no audio, transcription, speculative-generation policy or prompt code changed. Existing local Ctrl+Enter / Ctrl+L shortcuts remain. Qt 6 uses logical pixels and SVG/native assets; the launcher explicitly preserves fractional DPI scaling.
+
+### Screenshots (synthetic demo data)
+
+Generate these without keys or network calls with `python -m tools.render_ui` (`QT_SCALE_FACTOR=1.25`, `1.5` or `2` can also be used for offscreen previews). They are illustrations, not proof of native Windows display behavior.
+
+| Dark | Light |
+| --- | --- |
+| ![Dark reading workspace](docs/screenshots/dark.png) | ![Light reading workspace](docs/screenshots/light.png) |
+
+[High contrast](docs/screenshots/high-contrast.png) · [Searchable settings](docs/screenshots/settings.png) · [Mini bar](docs/screenshots/mini-bar.png)
+
+Still check on a real Windows display: 125/150/200% text and icon scaling; moving between monitors with different DPI; Windows light/dark and accessibility-contrast changes (including custom contrast colors); reduced-motion preferences; scrollbar/trackpad behavior; Mini bar placement/restoration and always-on-top without flicker; capture exclusion in actual meeting capture modes after each window transition. Offscreen tests verify themes/palette, presets and persistence, answer navigation, code copying, scroll pause/resume, transcript grouping and banners, but cannot validate physical monitor output or capture-tool behavior.
