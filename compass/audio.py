@@ -155,6 +155,8 @@ class LiveSession:
                             raise CoachError("Deepgram disconnected. Stop and restart the session.")
                         break
                     event = json.loads(message)
+                    if event.get("is_final") or event.get("speech_final"):
+                        self.emit("timing", ("deepgram_final", time.monotonic()))
                     if event.get("type") == "Error":
                         raise CoachError("Deepgram rejected the stream. Check model and audio settings.")
                     if event.get("type") == "SpeechStarted":
@@ -200,6 +202,8 @@ class LiveSession:
                             self.ws.send(json.dumps({"type": "KeepAlive"}))
                             last_audio = now
                         continue
+                    if level(chunk) > 2:
+                        self.emit("timing", ("last_speech", time.monotonic()))
                     self.ws.send_binary(chunk)
                     last_audio = now
                     if now - last_meter > 0.2:

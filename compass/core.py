@@ -144,7 +144,7 @@ def fast_generation_config(model: str) -> dict:
 
 
 def stream_google(config: ApiConfig, prompt: str, on_text: Callable[[str], None],
-                  cancel=None, screenshot: bytes | None = None) -> str:
+                  cancel=None, screenshot: bytes | None = None, timing=None) -> str:
     model = config.google_model.removeprefix("models/").strip()
     if not config.google_key or not re.fullmatch(r"gemini-[A-Za-z0-9._-]+", model):
         raise CoachError("Paste a Google AI Studio key and select a Gemini model.")
@@ -159,12 +159,19 @@ def stream_google(config: ApiConfig, prompt: str, on_text: Callable[[str], None]
         "generationConfig": fast_generation_config(model),
     }
     output = ""
+    if timing:
+        timing("request_sent")
     with requests.post(f"{GOOGLE_BASE}/models/{model}:streamGenerateContent",
                        params={"alt": "sse"}, headers={"x-goog-api-key": config.google_key},
                        json=payload, stream=True, timeout=(10, 60)) as response:
         if response.status_code >= 400:
             checked_json(response, "Google")
+        first_byte = True
         for raw in response.iter_lines(chunk_size=1):
+            if first_byte:
+                first_byte = False
+                if timing:
+                    timing("first_response_byte")
             if cancel is not None and cancel.is_set():
                 raise CoachError("Answer cancelled.")
             if not raw or not raw.startswith(b"data:"):
@@ -189,6 +196,8 @@ def stream_google(config: ApiConfig, prompt: str, on_text: Callable[[str], None]
                 on_text(output)
     if not output.strip():
         raise CoachError("Google returned no answer. Try a different model or shorter question.")
+    if timing:
+        timing("answer_complete")
     return output
 
 

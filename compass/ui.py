@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QTextBrowser, QVBoxLayout, QWidget, QSlider, QSpinBox,
 )
 
+from .latency import LatencyLog
 from .audio import LiveSession, ContinuousSession, list_devices
 from .core import ApiConfig, CoachError, MAX_CONTEXT, Preflight, build_prompt, list_google_models, read_context, safe_error, stream_google
 from .windows import decrypt_keys, encrypt_keys, set_capture_protection
@@ -141,6 +142,9 @@ class MainWindow(QMainWindow):
         self.bus.failed.connect(self.on_failed)
         self.bus.event.connect(self.on_event)
         self.busy: set[str] = set()
+        self.latency = LatencyLog()
+        self.turn_timing = None
+        self.audio_stamps = {}
         self.preflight = Preflight()
         self.session: LiveSession | None = None
         self.stopping = False
@@ -165,6 +169,9 @@ class MainWindow(QMainWindow):
         self.clock.setInterval(1000)
         self.clock.timeout.connect(self.tick)
         self.make_ui()
+        self.latency_status = label("Time to first words: —", "muted")
+        self.statusBar().addWidget(self.latency_status, 1)
+        self.statusBar().addPermanentWidget(button("Latency report", self.show_latency_report))
         self.capture_filter = CaptureFilter(app, self.capture_status)
         app.installEventFilter(self.capture_filter)
         self.load_settings()
@@ -659,10 +666,15 @@ class MainWindow(QMainWindow):
             elif kind == "test_interim":
                 self.audio_status.setText("Testing… “" + str(value)[:250] + "”")
             return
+        if kind == "timing":
+            self.audio_stamps[value[0]] = value[1]
+            return
         if kind == "answer_chunk":
             epoch, text = value
             if epoch == self.answer_epoch:
                 self.answer_view.setMarkdown(text)
+                self.latency.mark(self.turn_timing, "first_render")
+                self.show_latency_status()
             return
         if kind == "status":
             self.live_status.setText(value)
@@ -759,15 +771,19 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             self.footer.setText(str(exc))
             return
+        self.turn_timing = self.latency.new("audio" if self.session else "manual")
+        self.turn_timing.stamps.update(self.audio_stamps if self.session else {})
+        self.latency.mark(self.turn_timing, "auto_triggered")
         self.answer_epoch += 1
         epoch = self.answer_epoch
         self.answer_cancel = threading.Event()
         cancel = self.answer_cancel
         config = self.config()
+        timing = self.turn_timing
         self.answer_view.clear()
         self.footer.setText("Gemini is preparing your answer…")
         self.launch("answer", lambda: (epoch, question, stream_google(config, prompt,
-                    lambda text: self.bus.event.emit("answer_chunk", (epoch, text)), cancel, screenshot=screenshot)))
+                    lambda text: self.bus.event.emit("answer_chunk", (epoch, text)), cancel, screenshot=screenshot, timing=lambda stage: self.latency.mark(timing, stage))))
 
     def cancel_answer(self):
         self.answer_cancel.set()
@@ -815,6 +831,20 @@ class MainWindow(QMainWindow):
             row.setDirection(QBoxLayout.Direction.LeftToRight)
         self.header_title.setVisible(not narrow)
         self.coach_splitter.setMinimumHeight(440 if orientation == Qt.Orientation.Vertical and not self.transcript_panel.isHidden() else 260)
+
+    def show_latency_status(self):
+        stats = self.latency.report()["rolling"]
+        value = self.latency.first_words(self.turn_timing) if self.turn_timing else None
+        self.latency_status.setText(f"Time to first words: {value:.0f} ms · median {stats['median_ms']} ms · p95 {stats['p95_ms']} ms" if value is not None else "Time to first words: —")
+
+    def show_latency_report(self):
+        report = self.latency.dumps()
+        print(report, flush=True)
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("Local latency report")
+        dialog.setText("Timing only; no transcript, keys or telemetry.")
+        dialog.setDetailedText(report)
+        dialog.exec()
 
     def change_opacity(self, value):
         self.setWindowOpacity(value / 100)
@@ -1012,6 +1042,8 @@ class MainWindow(QMainWindow):
             if choice != QMessageBox.StandardButton.Yes:
                 event.ignore()
                 return
+        if "--latency-report" in sys.argv:
+            print(self.latency.dumps(), flush=True)
         self.closed = True
         self.timer.stop()
         self.clock.stop()
