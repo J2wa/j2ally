@@ -83,3 +83,28 @@ def apply_theme(app, choice, compact=False, family="Segoe UI"):
     app.setFont(QFont(family, 10))
     app.setStyleSheet(stylesheet(name, compact, family))
     return name
+
+# Overlay is intentionally dark regardless of the Standard view theme.
+OVERLAY = dict(panel='#14161b', raised='#1b1e25', border='#2b303b', text='#e8eaf0',
+               muted='#a3abbd', accent='#8aa4ff', success='#3ddc97', red='#c9252d',
+               white='#ffffff', ink='#101218', keyword='#c8a6ff', types='#72dccc',
+               function='#9fc5ff', number='#ffcf89', comment='#a3abbd')
+ACCENTS = {'Periwinkle': '#8aa4ff', 'Mint': '#83dbbe', 'Lavender': '#c4a5ff', 'Sand': '#edc58b'}
+
+
+def overlay_styles(accent='Periwinkle'):
+    c = dict(OVERLAY, accent=ACCENTS.get(accent, OVERLAY['accent']))
+    return f"""
+QWidget#overlayRoot {{ background: {c['ink']}; color: {c['text']}; font-family: Inter, 'Segoe UI'; font-size: 13px; }}
+QWidget#overlayRoot QFrame#panel {{ background: {c['panel']}; border: 1px solid {c['border']}; border-radius: 16px; }}
+QWidget#overlayRoot QLabel {{ color: {c['text']}; background: transparent; border: 0; }}
+QWidget#overlayRoot QLabel[muted="true"] {{ color: {c['muted']}; }}
+QWidget#overlayRoot QPushButton, QWidget#overlayRoot QComboBox, QWidget#overlayRoot QLineEdit {{ background: {c['raised']}; color: {c['text']}; border: 1px solid {c['border']}; border-radius: 10px; padding: 4px 8px; min-height: 28px; }}
+QWidget#overlayRoot QPushButton:focus, QWidget#overlayRoot QLineEdit:focus, QWidget#overlayRoot QComboBox:focus {{ border: 2px solid {c['accent']}; }}
+QWidget#overlayRoot QPushButton#primary, QWidget#overlayRoot QPushButton:checked, QWidget#overlayRoot QLabel#mark {{ background: {c['accent']}; color: {c['ink']}; border-radius: 10px; }}
+QWidget#overlayRoot QLabel#timer {{ background: {c['red']}; color: {c['white']}; padding: 5px 8px; border-radius: 10px; }}
+QWidget#overlayRoot QFrame#divider {{ background: {c['border']}; border: 0; }}
+QWidget#overlayRoot QFrame#caret {{ background: {c['accent']}; border: 0; }}
+QWidget#overlayRoot QTextBrowser {{ background: {c['panel']}; color: {c['text']}; border: 0; padding: 8px; }}
+QWidget#overlayRoot QPushButton:disabled {{ color: {c['muted']}; }}
+"""

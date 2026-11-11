@@ -13,9 +13,10 @@ from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QFileDialog, QFormLayout, QFrame,
     QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit,
     QProgressBar, QPushButton, QScrollArea, QSplitter, QStackedWidget,
-    QTextBrowser, QVBoxLayout, QWidget, QSlider, QSpinBox, QFontComboBox, QSizePolicy,
+    QTextBrowser, QVBoxLayout, QWidget, QSlider, QSpinBox, QFontComboBox, QSizePolicy, QKeySequenceEdit,
 )
 
+from .overlay import OverlayView, DEFAULT_SHORTCUTS
 from .themes import stylesheet, apply_theme, document_style, SPACE, TYPE
 from .reading import AnswerWorkspace, TurnTranscript
 from .status import StatusStrip
@@ -140,6 +141,9 @@ class MainWindow(QMainWindow):
         self.answer_cancel = Cancellation()
         self.answer_epoch = 0
         self.closed = False
+        self.shell_mode = "Standard"
+        self.shell_geometries = {}
+        self.shortcut_map = dict(DEFAULT_SHORTCUTS)
         self.selected_turn = None
         self.mini = False
         self._normal_geometry = None
@@ -185,10 +189,11 @@ class MainWindow(QMainWindow):
         self.refresh_devices()
         self.update_ready()
         self.shortcuts = []
-        for seq, fn in (("Ctrl+Return", self.ask), ("Ctrl+L", lambda: self.question.setFocus())):
-            shortcut = QShortcut(QKeySequence(seq), self)
-            shortcut.activated.connect(fn)
-            self.shortcuts.append(shortcut)
+        self.remap_shortcuts()
+        self.overlay_poll = QTimer(self)
+        self.overlay_poll.setInterval(40)
+        self.overlay_poll.timeout.connect(self.sync_overlay)
+        self.overlay_poll.start()
 
     def make_ui(self):
         shell = QWidget()
@@ -513,6 +518,9 @@ class MainWindow(QMainWindow):
 
     def make_view_menu(self):
         menu = self.menuBar().addMenu("View")
+        for mode in ("Standard", "Overlay", "Compact bar"):
+            menu.addAction(mode, lambda checked=False, value=mode: self.set_shell(value))
+        menu.addSeparator()
         self.preset_actions = []
         group = QActionGroup(self)
         group.setExclusive(True)
@@ -594,6 +602,18 @@ class MainWindow(QMainWindow):
         opacity.valueChanged.connect(self.opacity.setValue); self.opacity.valueChanged.connect(opacity.setValue)
         form.addRow("Window opacity", opacity)
         layout.addLayout(form); layout.addWidget(self.reduced_motion)
+        self.overlay_accent = QComboBox()
+        from .themes import ACCENTS
+        self.overlay_accent.addItems(ACCENTS)
+        self.overlay_accent.currentTextChanged.connect(lambda _: self.refresh_overlay_style())
+        layout.addWidget(label("Overlay accent")); layout.addWidget(self.overlay_accent)
+        self.shortcut_editors = {}
+        for name, sequence in DEFAULT_SHORTCUTS.items():
+            editor = QKeySequenceEdit(QKeySequence(sequence))
+            editor.setAccessibleName(name + " shortcut")
+            editor.editingFinished.connect(lambda action=name, widget=editor: self.set_shortcut(action, widget.keySequence().toString()))
+            row = QHBoxLayout(); row.addWidget(label(name)); row.addWidget(editor)
+            layout.addLayout(row); self.shortcut_editors[name] = editor
         layout.addWidget(self.on_top)  # move the existing preference, preserving its signals
         layout.addWidget(label("View menu: layouts, Compact mode and Mini bar. Fonts and icons use Qt logical pixels.", "muted"))
         layout = section("Privacy", "capture exclusion screen sharing protection dpapi remember encrypted keys save")
@@ -670,6 +690,8 @@ class MainWindow(QMainWindow):
         return [self.width(), self.height()]
 
     def toggle_mini(self, enabled):
+        if self.shell_mode != "Standard":
+            self.set_shell("Standard")
         if enabled == self.mini:
             return
         from .reading import RichAnswer
@@ -725,6 +747,94 @@ class MainWindow(QMainWindow):
         self.update()
         if hasattr(self, 'capture_filter'):
             self.capture_filter.apply_all()
+
+    def set_shell(self, mode, restoring=False):
+        if mode not in ("Standard", "Overlay", "Compact bar") or mode == self.shell_mode:
+            return
+        if self.mini:
+            self.mini_action.setChecked(False)
+        if not restoring:
+            self.shell_geometries[self.shell_mode] = [self.x(), self.y(), self.width(), self.height()]
+        visible = self.isVisible()
+        self.setUpdatesEnabled(False)
+        if self.shell_mode == 'Standard':
+            self.standard_shell = self.takeCentralWidget()
+            self.standard_shell.hide()
+            self.standard_minimum = self.minimumSize()
+        else:
+            old = self.takeCentralWidget()
+            self.overlay_viewport.removeEventFilter(self); self.overlay_viewport = None
+            old.deleteLater()
+        self.shell_mode = mode
+        self.setWindowFlag(Qt.WindowType.FramelessWindowHint, mode != 'Standard')
+        if mode == 'Standard':
+            self.setCentralWidget(self.standard_shell); self.standard_shell.show()
+            self.setMinimumSize(self.standard_minimum); self.menuBar().show(); self.statusBar().show()
+        else:
+            self.overlay = OverlayView(self, mode == 'Compact bar')
+            self.overlay_viewport = self.overlay.browser.viewport()
+            self.overlay_viewport.installEventFilter(self)
+            self.setCentralWidget(self.overlay)
+            self.menuBar().hide(); self.statusBar().hide()
+            self.setMinimumSize(600 if mode == 'Compact bar' else 760, 56 if mode == 'Compact bar' else 320)
+        default = [self.x(), self.y(), 900, 700 if mode == 'Overlay' else 56]
+        x,y,width,height = self.shell_geometries.get(mode, default)
+        screen = self.screen().availableGeometry()
+        width=max(self.minimumWidth(), min(width, screen.width()))
+        height=max(self.minimumHeight(), min(height, screen.height()))
+        x=max(screen.left(),min(x,screen.right()-width+1)); y=max(screen.top(),min(y,screen.bottom()-height+1))
+        self.setGeometry(x,y,width,height)
+        if visible: self.show()
+        self.setUpdatesEnabled(True)
+        self.change_opacity(self.opacity.value())
+        if hasattr(self, 'capture_filter'): self.capture_filter.apply_all()
+
+    def sync_overlay(self):
+        if not self.closed and self.shell_mode != 'Standard':
+            self.overlay.sync()
+
+    def refresh_overlay_style(self):
+        if hasattr(self, 'overlay') and self.shell_mode != 'Standard':
+            self.overlay.apply_style()
+
+    def set_shortcut(self, name, sequence):
+        sequence = QKeySequence(sequence).toString()
+        normalized = QKeySequence(sequence).toString(QKeySequence.SequenceFormat.PortableText)
+        for action, current in self.shortcut_map.items():
+            if action != name and normalized and QKeySequence(current).toString(QKeySequence.SequenceFormat.PortableText) == normalized:
+                self.status_strip.show_error("That shortcut is already assigned to " + action, "Appearance")
+                self.shortcut_editors[name].setKeySequence(QKeySequence(self.shortcut_map[name]))
+                return False
+        self.shortcut_map[name] = sequence
+        self.remap_shortcuts()
+        return True
+
+    def remap_shortcuts(self):
+        if not hasattr(self, 'shortcuts'): return
+        for shortcut in self.shortcuts:
+            shortcut.setEnabled(False); shortcut.deleteLater()
+        self.shortcuts = []
+        callbacks = {'Answer': self.ask, 'Question': self.focus_question,
+            'Screenshot': self.capture_screen, 'Chat': self.open_overlay_chat,
+            'Previous': lambda: self.answer_workspace.select(self.answer_workspace.selected-1),
+            'Next': lambda: self.answer_workspace.select(self.answer_workspace.selected+1),
+            'Clear answer': lambda: self.overlay_clear('answer'), 'Clear transcript': lambda: self.overlay_clear('transcript')}
+        for name, sequence in self.shortcut_map.items():
+            if sequence:
+                shortcut = QShortcut(QKeySequence(sequence), self)
+                shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+                shortcut.activated.connect(callbacks[name]); self.shortcuts.append(shortcut)
+
+    def focus_question(self):
+        self.set_shell('Standard'); self.go(2); self.question.setFocus()
+
+    def open_overlay_chat(self):
+        if self.shell_mode == 'Standard': self.set_shell('Overlay')
+        self.overlay.toggle_chat()
+
+    def overlay_clear(self, kind):
+        if self.shell_mode == 'Standard': self.set_shell('Overlay')
+        self.overlay.clear(kind)
 
     def config(self):
         return ApiConfig(self.google_key.text().strip(), self.google_model.currentText().strip(),
@@ -1036,7 +1146,7 @@ class MainWindow(QMainWindow):
             self.show_latency_status()
 
     def eventFilter(self, watched, event):
-        if not self.closed and watched in (getattr(self, "answer_viewport", None), getattr(self, "mini_viewport", None)) and event.type() == QEvent.Type.Paint and self.render_wait:
+        if not self.closed and watched in (getattr(self, "answer_viewport", None), getattr(self, "mini_viewport", None), getattr(self, "overlay_viewport", None)) and event.type() == QEvent.Type.Paint and self.render_wait:
             epoch, timing = self.render_wait
             self.render_wait = None
             def painted():
@@ -1167,6 +1277,7 @@ class MainWindow(QMainWindow):
         cancel = self.answer_cancel
         config, timing = self.config(), self.turn_timing
         self.answer_workspace.begin(epoch, question, self.selected_turn if self.selected_turn is not None else (len(self.transcript_view.turns) - 1 if self.transcript_view.turns else None))
+        self.answer_workspace.entries[-1].timing = self.turn_timing
         self.status_strip.set_answer("waiting")
         self.status_strip.gemini.setText("Gemini: requesting")
         self.footer.setText("Early draft · waiting for final transcript" if speculative else "Gemini is preparing your answer…")
@@ -1248,7 +1359,7 @@ class MainWindow(QMainWindow):
 
     def settle_resize(self):
         self._resize_pending = False
-        if self.closed or self.mini:
+        if self.closed or self.mini or self.shell_mode != "Standard":
             return
         if self.width() < 1100:
             self.sidebar.hide()
@@ -1391,6 +1502,8 @@ class MainWindow(QMainWindow):
                     "opacity": self.opacity.value(), "answer_font": self.answer_font.value(),
                     "layout_mode": self.layout_mode.currentIndex(), "panel_sizes": self.coach_splitter.sizes(),
                     "window_size": self.normal_window_size(), "response_speed": self.speed.currentText(),
+                    "shell_mode": self.shell_mode, "shell_geometries": dict(self.shell_geometries, **{self.shell_mode: [self.x(),self.y(),self.width(),self.height()]}),
+                    "overlay_accent": self.overlay_accent.currentText(), "shortcuts": self.shortcut_map,
                     "theme": self.theme_choice.currentText(), "font_family": self.font_choice.currentFont().family(),
                     "compact": self.compact_action.isChecked(), "reduced_motion": self.reduced_motion.isChecked(), "mini_bar": self.mini,
                     "key_points_first": self.answer_workspace.key_first.isChecked(),
@@ -1410,6 +1523,15 @@ class MainWindow(QMainWindow):
             if not self.config_path.exists():
                 return
             data = json.loads(self.config_path.read_text(encoding="utf-8"))
+            self.shell_geometries = data.get('shell_geometries', {})
+            self.overlay_accent.setCurrentText(data.get('overlay_accent','Periwinkle'))
+            stored = data.get('shortcuts', {})
+            for name in DEFAULT_SHORTCUTS:
+                if name in stored:
+                    self.shortcut_map[name] = str(stored[name])
+                    self.shortcut_editors[name].setKeySequence(QKeySequence(str(stored[name])))
+            if data.get('shell_mode') in ('Overlay','Compact bar'):
+                QTimer.singleShot(0, lambda value=data['shell_mode']: self.set_shell(value, restoring=True))
             self.theme_choice.setCurrentText(data.get("theme", "Follow Windows"))
             self.font_choice.setCurrentFont(QFont(data.get("font_family", "Segoe UI")))
             self.compact_action.setChecked(bool(data.get("compact", False)))
@@ -1518,6 +1640,7 @@ class MainWindow(QMainWindow):
         if "--latency-report" in sys.argv:
             print(self.latency.dumps(), flush=True)
         self.closed = True
+        self.overlay_poll.stop()
         self.practice.shutdown()
         self.style_hints.colorSchemeChanged.disconnect(self.native_theme_changed)
         self.accessibility_hints.contrastPreferenceChanged.disconnect(self.native_theme_changed)
@@ -1535,6 +1658,9 @@ class MainWindow(QMainWindow):
         if self.test_session:
             self.test_session.stop()
         self.save_settings()
+        if self.shell_mode != 'Standard':
+            self.overlay_viewport.removeEventFilter(self)
+            self.standard_shell.deleteLater()
         event.accept()
 
 
