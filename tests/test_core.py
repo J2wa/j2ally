@@ -25,8 +25,9 @@ class Response:
     def json(self):
         return self.data
 
-    def iter_lines(self, **_):
-        yield from self.lines
+    def iter_content(self, **_):
+        for line in self.lines:
+            yield line + b"\n"
 
 
 def event(text, **extra):

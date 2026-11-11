@@ -16,6 +16,7 @@ def window(app, monkeypatch, tmp_path):
     monkeypatch.setattr("compass.ui.list_devices", lambda: [DEVICE.copy()])
     monkeypatch.setattr("compass.ui.set_capture_protection", lambda *_: (True, "Capture exclusion requested · verify in your meeting app"))
     app.setStyleSheet(STYLE)
+    monkeypatch.setattr("compass.ui.GeminiTransport.prewarm", lambda _: None)
     w = MainWindow(app)
     w.show()
     pump(app, lambda: not w.busy)
@@ -81,8 +82,8 @@ def test_manual_question_context_and_streaming(window, app, monkeypatch):
     window.preflight.google = window.config().google_signature()
     window.update_ready()
     seen = []
-    def generate(config, prompt, on_text, cancel, screenshot=None):
-        seen.append(json.loads(prompt))
+    def generate(config, prompt, on_text, cancel, screenshot=None, **kwargs):
+        seen.append(json.loads(prompt[0]))
         on_text("## Suggested answer\nI use Python.")
         return "## Suggested answer\nI use Python."
     monkeypatch.setattr("compass.ui.stream_google", generate)
@@ -291,3 +292,89 @@ def test_layout_modes_and_small_window(window, app):
     window.layout_mode.setCurrentIndex(2)
     assert window.coach_splitter.orientation() == Qt.Orientation.Vertical
     assert window.transcript_panel.maximumWidth() > 310
+
+
+def test_speculative_final_match_keeps_one_answer(window, app, monkeypatch):
+    import threading
+    seed(window)
+    window.session = object()
+    window.audio_stamps['last_speech'] = 0
+    window.hypothesis_at = 0
+    window.hypothesis = 'How do you test software?'
+    calls = []
+    def stream(config, prompt, on_text, cancel, **kwargs):
+        calls.append(prompt)
+        on_text('I test incrementally.')
+        return 'I test incrementally.'
+    monkeypatch.setattr('compass.ui.stream_google', stream)
+    window.maybe_speculate()
+    pump(app, lambda: 'answer' not in window.busy)
+    assert not window.answers  # unconfirmed speculation is not committed
+    window.on_event('utterance', 'How do you test software?')
+    window.on_event('utterance', 'How do you test software?')
+    assert len(calls) == len(window.answers) == 1
+    window.session = None
+
+
+def test_cancelled_worker_cannot_release_new_slot(window, app, monkeypatch):
+    import threading
+    seed(window)
+    window.session = object()
+    window.audio_stamps['last_speech'] = 0
+    window.hypothesis_at = 0
+    window.hypothesis = 'How do you test software?'
+    release = threading.Event()
+    calls = []
+    def stream(config, prompt, on_text, cancel, **kwargs):
+        calls.append(prompt)
+        if len(calls) == 1:
+            release.wait(2)  # deliberately ignores cancellation to test stale worker isolation
+            on_text('Obsolete')
+            return 'Obsolete'
+        on_text('Corrected answer')
+        return 'Corrected answer'
+    monkeypatch.setattr('compass.ui.stream_google', stream)
+    window.maybe_speculate()
+    pump(app, lambda: len(calls) == 1)
+    old_epoch = window.answer_epoch
+    window.on_event('utterance', 'How do you test software without specifications?')
+    assert 'answer' not in window.busy  # slot freed before old worker exits
+    window.auto_answer()
+    pump(app, lambda: len(window.answers) == 1)
+    release.set()
+    window.on_failed(f'answer:{old_epoch}', 'late error')
+    app.processEvents()
+    assert window.answers[0][1] == 'Corrected answer'
+    assert window.latency.speculative_cancelled == 1
+    assert 'Obsolete' not in window.answer_view.toPlainText()
+    window.session = None
+
+
+def test_fast_skips_smalltalk_and_cancel_suppresses_final(window, monkeypatch):
+    seed(window)
+    window.session = object()
+    window.pending_auto = 'Thanks for your time.'
+    window.auto_answer()
+    assert 'Skipped' in window.skip_status.text()
+    window.cancel_answer()
+    window.on_event('utterance', 'How do you test software?')
+    assert not window.timer.isActive()
+    assert not window.pending_auto
+    window.session = None
+
+
+def test_first_render_is_recorded_after_paint(window, app, monkeypatch):
+    seed(window)
+    window.go(2)
+    def stream(config, prompt, on_text, cancel, **kwargs):
+        kwargs['timing']('request_sent')
+        kwargs['timing']('first_response_byte')
+        on_text('A direct opening.')
+        kwargs['timing']('answer_complete')
+        return 'A direct opening.'
+    monkeypatch.setattr('compass.ui.stream_google', stream)
+    window.question.setPlainText('How do you test software?')
+    window.ask()
+    pump(app, lambda: window.turn_timing and 'first_render' in window.turn_timing.stamps)
+    assert 'Time to first words:' in window.latency_status.text()
+    assert window.latency.report()['rolling']['count'] == 1

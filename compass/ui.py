@@ -16,9 +16,11 @@ from PySide6.QtWidgets import (
     QTextBrowser, QVBoxLayout, QWidget, QSlider, QSpinBox,
 )
 
+from .turns import TurnGate, SPEEDS, adaptive_wait, is_question
+from .transport import Cancellation, GeminiTransport
 from .latency import LatencyLog
 from .audio import LiveSession, ContinuousSession, list_devices
-from .core import ApiConfig, CoachError, MAX_CONTEXT, Preflight, build_prompt, list_google_models, read_context, safe_error, stream_google
+from .core import ApiConfig, CoachError, MAX_CONTEXT, Preflight, PromptContext, preferred_flash, build_prompt, list_google_models, read_context, safe_error, stream_google
 from .windows import decrypt_keys, encrypt_keys, set_capture_protection
 
 
@@ -145,11 +147,32 @@ class MainWindow(QMainWindow):
         self.latency = LatencyLog()
         self.turn_timing = None
         self.audio_stamps = {}
+        self.transport = GeminiTransport()
+        self.prompt_context = None
+        self.prompt_signature = None
+        self.gate = TurnGate()
+        self.hypothesis = ""
+        self.hypothesis_at = 0
+        self.speculative = False
+        self.confirmed = True
+        self.held_result = None
+        self.active_question = ""
+        self.render_pending = None
+        self.render_wait = None
+        self.chunk_lock = threading.Lock()
+        self.render_timer = QTimer(self)
+        self.render_timer.setInterval(40)
+        self.render_timer.timeout.connect(self.flush_render)
+        self.render_timer.start()
+        self.spec_timer = QTimer(self)
+        self.spec_timer.setInterval(40)
+        self.spec_timer.timeout.connect(self.maybe_speculate)
+        self.spec_timer.start()
         self.preflight = Preflight()
         self.session: LiveSession | None = None
         self.stopping = False
         self.test_session: LiveSession | None = None
-        self.answer_cancel = threading.Event()
+        self.answer_cancel = Cancellation()
         self.answer_epoch = 0
         self.closed = False
         self.capturing = False
@@ -272,6 +295,7 @@ class MainWindow(QMainWindow):
         self.google_model = QComboBox()
         self.google_model.setEditable(True)
         self.google_model.setPlaceholderText("Load models, then select a text model")
+        self.google_model.setCurrentText("gemini-2.5-flash-lite")
         form = QFormLayout()
         form.addRow("API key", self.google_key)
         form.addRow("Answer model", self.google_model)
@@ -390,12 +414,20 @@ class MainWindow(QMainWindow):
         self.answer_language.setMaximumWidth(110)
         self.answer_language.setEditable(True)
         self.answer_language.addItems(["English", "Filipino", "Taglish"])
+        self.speed = QComboBox()
+        self.speed.addItems(["Fast", "Balanced", "Careful"])
+        self.speed.setToolTip("Response speed: Fast may be less considered and may cancel billable speculative requests.")
+        row.addWidget(label("Response speed"))
+        row.addWidget(self.speed)
         row.addWidget(self.auto)
         row.addStretch()
         row.addWidget(self.style)
         row.addWidget(self.answer_language)
         self.responsive_rows.append(row)
         page.addLayout(row)
+        page.addWidget(label("Fast answers can be less considered. Verify facts and personal experience.", "muted"))
+        self.skip_status = label("", "muted")
+        page.addWidget(self.skip_status)
         options = QHBoxLayout()
         self.layout_mode = QComboBox()
         self.layout_mode.addItems(["Auto layout", "Side by side", "Stacked"])
@@ -437,6 +469,8 @@ class MainWindow(QMainWindow):
         self.answer_panel = right
         self.answer_view = QTextBrowser()
         self.answer_view.setObjectName("answerCanvas")
+        self.answer_viewport = self.answer_view.viewport()
+        self.answer_viewport.installEventFilter(self)
         self.answer_view.viewport().setStyleSheet("background-color: #edf3ff; color: #132441;")
         self.answer_view.setMinimumWidth(0)
         self.answer_view.setMinimumHeight(120)
@@ -480,7 +514,7 @@ class MainWindow(QMainWindow):
     def config(self):
         return ApiConfig(self.google_key.text().strip(), self.google_model.currentText().strip(),
                          self.deepgram_key.text().strip(), self.deepgram_model.text().strip(),
-                         self.audio_language.currentText().strip())
+                         self.audio_language.currentText().strip(), self.speed.currentText())
 
     def go(self, index):
         self.stack.setCurrentIndex(index)
@@ -524,9 +558,9 @@ class MainWindow(QMainWindow):
         self.models_btn.setEnabled(bool(config.google_key) and "models" not in self.busy and not self.session)
         self.audio_test_btn.setEnabled(bool(config.deepgram_key and device) and not audio_busy)
         self.refresh_btn.setEnabled(not audio_busy)
-        self.cancel_btn.setEnabled("answer" in self.busy)
+        self.cancel_btn.setEnabled("answer" in self.busy or (self.speculative and not self.confirmed and self.held_result is not None))
         # Freeze audio credentials and source during tests/sessions; answer settings during sessions.
-        for widget in (self.deepgram_key, self.deepgram_model, self.audio_language, self.devices):
+        for widget in (self.deepgram_key, self.deepgram_model, self.audio_language, self.devices, self.speed):
             widget.setEnabled(not audio_busy)
         for widget in (self.google_key, self.google_model):
             widget.setEnabled(not self.session)
@@ -588,6 +622,11 @@ class MainWindow(QMainWindow):
         self.launch("audio_test", work)
 
     def on_done(self, name, result):
+        if name.startswith("answer:"):
+            epoch = int(name.split(":")[1])
+            if epoch != self.answer_epoch:
+                return
+            name = "answer"
         self.busy.discard(name)
         if name == "models":
             key, models = result
@@ -598,7 +637,7 @@ class MainWindow(QMainWindow):
                 if previous in models:
                     self.google_model.setCurrentText(previous)
                 else:
-                    fast = next((m for m in models if "flash" in m and "preview" not in m and "exp" not in m), models[0])
+                    fast = preferred_flash(models)
                     self.google_model.setCurrentText(fast)
                 self.footer.setText(f"Loaded {len(models)} models. Select one and test its answer.")
         elif name == "devices":
@@ -634,14 +673,19 @@ class MainWindow(QMainWindow):
         elif name == "answer":
             epoch, question, answer = result
             if epoch == self.answer_epoch:
-                self.answers.append((question, answer))
-                self.answer_view.setMarkdown(answer)
-                self.footer.setText("Answer ready · check the resume evidence before using it.")
+                self.flush_render()
+                self.held_result = result
+                if self.confirmed:
+                    self.commit_answer()
             if self.pending_auto and self.auto.isChecked() and self.session:
-                self.timer.start()
+                self.timer.start(adaptive_wait(self.pending_auto, self.speed.currentText()))
         self.update_ready()
 
     def on_failed(self, name, message):
+        if name.startswith("answer:"):
+            if int(name.split(":")[1]) != self.answer_epoch:
+                return
+            name = "answer"
         self.busy.discard(name)
         if name == "google_test":
             self.google_status.setText("Test failed · " + message)
@@ -652,6 +696,9 @@ class MainWindow(QMainWindow):
         elif name == "session":
             self.finish_session()
             self.live_status.setText("Connection stopped · correct settings, then Start coach")
+        elif name == "answer" and not self.answer_cancel.is_set():
+            self.gate.suppressed = True
+            self.held_result = None
         elif name == "answer" and self.answer_cancel.is_set():
             self.footer.setText("Answer cancelled.")
             self.update_ready()
@@ -667,14 +714,20 @@ class MainWindow(QMainWindow):
                 self.audio_status.setText("Testing… “" + str(value)[:250] + "”")
             return
         if kind == "timing":
+            if value[0] == "last_speech" and self.speculative and not self.confirmed and self.gate.sent:
+                self.cancel_answer(suppress=False)
+                self.gate.sent = ""
+                self.hypothesis = ""
             self.audio_stamps[value[0]] = value[1]
             return
         if kind == "answer_chunk":
-            epoch, text = value
-            if epoch == self.answer_epoch:
-                self.answer_view.setMarkdown(text)
-                self.latency.mark(self.turn_timing, "first_render")
-                self.show_latency_status()
+            self.queue_render(*value)
+            return
+        if kind == "hypothesis":
+            if self.gate.finalized:
+                self.gate = TurnGate()
+            self.hypothesis = str(value)
+            self.hypothesis_at = time.monotonic()
             return
         if kind == "status":
             self.live_status.setText(value)
@@ -688,15 +741,80 @@ class MainWindow(QMainWindow):
             self.interim.setText("")
         elif kind in ("interim", "speaking"):
             self.timer.stop()
+            if kind == "speaking":
+                self.hypothesis = ""
+                if self.gate.finalized:
+                    self.gate = TurnGate()
+                elif self.speculative and not self.confirmed:
+                    self.cancel_answer(suppress=False)
+                    self.gate.sent = ""
             if kind == "interim":
                 self.interim.setText(str(value)[-250:])
         elif kind == "utterance":
+            self.hypothesis = ""
             self.pending_utterance = str(value)
             if not self.question.hasFocus() or not self.question.toPlainText().strip():
                 self.question.setPlainText(value)
             if self.auto.isChecked() and self.session and not self.stopping:
-                self.pending_auto = (self.pending_auto + " " + value).strip()
-                self.timer.start()
+                decision = self.gate.final(str(value))
+                if decision == "keep":
+                    self.confirmed = True
+                    if self.turn_timing:
+                        self.turn_timing.stamps.update(self.audio_stamps)
+                    if self.held_result:
+                        self.commit_answer()
+                    return
+                if decision in ("duplicate", "skip"):
+                    return
+                if decision == "restart":
+                    self.cancel_answer(suppress=False)
+                self.pending_auto = (self.pending_auto + " " + str(value)).strip()
+                self.timer.start(adaptive_wait(self.pending_auto, self.speed.currentText()))
+
+    def commit_answer(self):
+        if self.held_result:
+            _, question, answer = self.held_result
+            self.held_result = None
+            self.answers.append((question, answer))
+            self.answer_view.setMarkdown(answer)
+            self.footer.setText("Answer ready · check the resume evidence before using it.")
+            self.show_latency_status()
+
+    def queue_render(self, epoch, text):
+        with self.chunk_lock:
+            if epoch == self.answer_epoch:
+                self.render_pending = (epoch, text)
+
+    def flush_render(self):
+        with self.chunk_lock:
+            pending, self.render_pending = self.render_pending, None
+        if pending and pending[0] == self.answer_epoch:
+            # Plain text displays partial words immediately; Markdown is applied at completion.
+            self.answer_view.setPlainText(pending[1])
+            if self.turn_timing and "first_render" not in self.turn_timing.stamps:
+                self.render_wait = (self.answer_epoch, self.turn_timing)
+            self.show_latency_status()
+
+    def eventFilter(self, watched, event):
+        if not self.closed and watched is getattr(self, "answer_viewport", None) and event.type() == QEvent.Type.Paint and self.render_wait:
+            epoch, timing = self.render_wait
+            self.render_wait = None
+            def painted():
+                if epoch == self.answer_epoch:
+                    self.latency.mark(timing, "first_render")
+                    self.show_latency_status()
+            QTimer.singleShot(0, painted)
+        return super().eventFilter(watched, event)
+
+    def maybe_speculate(self):
+        if not self.session or self.stopping or not self.auto.isChecked() or "answer" in self.busy or self.capturing:
+            return
+        now = time.monotonic()
+        last = max(self.audio_stamps.get("last_speech", now), self.hypothesis_at)
+        if self.gate.speculate(self.hypothesis, (now - last) * 1000, self.speed.currentText()):
+            self.pending_auto = ""
+            self.timer.stop()
+            self.generate(self.hypothesis, speculative=True, automatic=True)
 
     def start_session(self):
         if not self.start_btn.isEnabled():
@@ -709,6 +827,11 @@ class MainWindow(QMainWindow):
         self.pending_utterance = ""
         self.stopping = False
         self.coach_started = True
+        self.prompt_context = PromptContext(self.resume.toPlainText(), self.job.toPlainText())
+        self.prompt_signature = (self.resume.toPlainText(), self.job.toPlainText())
+        self.gate = TurnGate()
+        self.audio_stamps = {}
+        self.transport.prewarm()
         self.session = ContinuousSession(config, device, self.bus.event.emit)
         self.started_at = time.monotonic()
         self.clock.start()
@@ -721,6 +844,8 @@ class MainWindow(QMainWindow):
         self.stopping = True
         self.timer.stop()
         self.pending_auto = ""
+        if self.speculative and not self.confirmed:
+            self.cancel_answer()
         if self.session:
             self.session.stop()
             self.stop_btn.setEnabled(False)
@@ -738,10 +863,14 @@ class MainWindow(QMainWindow):
         self.update_ready()
 
     def tick(self):
+        if "answer" not in self.busy:
+            self.transport.prewarm()
         seconds = int(time.monotonic() - self.started_at) if self.started_at else 0
         self.elapsed.setText(f"SESSION  {seconds // 60:02d}:{seconds % 60:02d}")
 
     def ask(self):
+        if self.speculative and not self.confirmed:
+            self.cancel_answer()
         if not self.ask_btn.isEnabled():
             return
         self.pending_auto = ""
@@ -755,41 +884,79 @@ class MainWindow(QMainWindow):
             return  # on_done restarts the timer with the pending complete turn.
         question, self.pending_auto = self.pending_auto, ""
         self.question.setPlainText(question)
-        self.generate(question)
+        if self.speed.currentText() == "Fast" and not is_question(question):
+            self.skip_status.setText("Skipped: statement, small talk, or incomplete question. Use Ctrl+Enter to answer manually.")
+            return
+        self.skip_status.setText("")
+        self.generate(question, automatic=True)
 
     def auto_changed(self, enabled):
         if not enabled:
             self.timer.stop()
             self.pending_auto = ""
+            if self.speculative and not self.confirmed:
+                self.cancel_answer()
+            if self.speculative and not self.confirmed:
+                self.cancel_answer()
 
-    def generate(self, question, screenshot=None):
+    def generate(self, question, screenshot=None, speculative=False, automatic=False):
         if "answer" in self.busy:
             return
         try:
-            prompt = build_prompt(self.resume.toPlainText(), self.job.toPlainText(), question,
-                                  "\n".join(self.transcript), self.style.currentText(), self.answer_language.currentText())
+            signature = (self.resume.toPlainText(), self.job.toPlainText())
+            if signature != self.prompt_signature:
+                self.prompt_context = PromptContext(*signature)
+                self.prompt_signature = signature
+            prompt = self.prompt_context.build(question, "\n".join(self.transcript), self.style.currentText(),
+                                               self.answer_language.currentText(), self.speed.currentText())
         except Exception as exc:
             self.footer.setText(str(exc))
             return
-        self.turn_timing = self.latency.new("audio" if self.session else "manual")
-        self.turn_timing.stamps.update(self.audio_stamps if self.session else {})
+        self.speculative, self.confirmed = speculative, not speculative
+        self.held_result = None
+        self.active_question = question
+        self.turn_timing = self.latency.new("audio" if automatic else "manual", speculative)
+        if automatic:
+            self.turn_timing.stamps.update(self.audio_stamps)
         self.latency.mark(self.turn_timing, "auto_triggered")
         self.answer_epoch += 1
         epoch = self.answer_epoch
-        self.answer_cancel = threading.Event()
+        self.answer_cancel = Cancellation()
         cancel = self.answer_cancel
-        config = self.config()
-        timing = self.turn_timing
+        config, timing = self.config(), self.turn_timing
         self.answer_view.clear()
-        self.footer.setText("Gemini is preparing your answer…")
-        self.launch("answer", lambda: (epoch, question, stream_google(config, prompt,
-                    lambda text: self.bus.event.emit("answer_chunk", (epoch, text)), cancel, screenshot=screenshot, timing=lambda stage: self.latency.mark(timing, stage))))
+        self.footer.setText("Early draft · waiting for final transcript" if speculative else "Gemini is preparing your answer…")
+        self.busy.add("answer")
+        self.update_ready()
+        def work():
+            try:
+                answer = stream_google(config, prompt, lambda text: self.queue_render(epoch, text), cancel,
+                                       screenshot=screenshot, transport=self.transport,
+                                       timing=lambda stage: self.latency.mark(timing, stage))
+                if not self.closed:
+                    self.bus.done.emit(f"answer:{epoch}", (epoch, question, answer))
+            except Exception as exc:
+                if not self.closed:
+                    self.bus.failed.emit(f"answer:{epoch}", safe_error(exc, config.google_key, config.deepgram_key))
+        threading.Thread(target=work, daemon=True, name=f"answer:{epoch}").start()
 
-    def cancel_answer(self):
+    def cancel_answer(self, suppress=True):
         self.answer_cancel.set()
+        self.latency.cancel(self.turn_timing)
         self.answer_epoch += 1
+        with self.chunk_lock:
+            self.render_pending = None
+        self.held_result = None
+        self.render_wait = None
+        self.busy.discard("answer")
         self.pending_auto = ""
-        self.footer.setText("Cancelling answer…")
+        self.timer.stop()
+        if suppress:
+            self.gate.suppressed = True
+        self.answer_view.clear()
+        self.footer.setText("Answer cancelled.")
+        self.show_latency_status()
+        self.update_ready()
 
     def toggle_sidebar(self):
         self.sidebar.setVisible(self.sidebar.isHidden())
@@ -835,7 +1002,7 @@ class MainWindow(QMainWindow):
     def show_latency_status(self):
         stats = self.latency.report()["rolling"]
         value = self.latency.first_words(self.turn_timing) if self.turn_timing else None
-        self.latency_status.setText(f"Time to first words: {value:.0f} ms · median {stats['median_ms']} ms · p95 {stats['p95_ms']} ms" if value is not None else "Time to first words: —")
+        self.latency_status.setText(f"Time to first words: {value:.0f} ms · median {stats['median_ms']} ms · p95 {stats['p95_ms']} ms · speculative cancelled {self.latency.speculative_cancelled}" if value is not None else f"Time to first words: — · speculative cancelled {self.latency.speculative_cancelled}")
 
     def show_latency_report(self):
         report = self.latency.dumps()
@@ -933,7 +1100,7 @@ class MainWindow(QMainWindow):
                     "audio_language": config.language, "capture_protection": self.protection.isChecked(),
                     "opacity": self.opacity.value(), "answer_font": self.answer_font.value(),
                     "layout_mode": self.layout_mode.currentIndex(), "panel_sizes": self.coach_splitter.sizes(),
-                    "window_size": [self.width(), self.height()]}
+                    "window_size": [self.width(), self.height()], "response_speed": self.speed.currentText()}
             if self.remember.isChecked():
                 data["encrypted_keys"] = encrypt_keys(json.dumps({"google": config.google_key, "deepgram": config.deepgram_key}))
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -949,6 +1116,7 @@ class MainWindow(QMainWindow):
             if not self.config_path.exists():
                 return
             data = json.loads(self.config_path.read_text(encoding="utf-8"))
+            self.speed.setCurrentText(data.get("response_speed", "Fast"))
             self.opacity.setValue(max(25, min(100, int(data.get("opacity", 100)))))
             self.answer_font.setValue(max(16, min(32, int(data.get("answer_font", 22)))))
             self.layout_mode.setCurrentIndex(max(0, min(2, int(data.get("layout_mode", 0)))))
@@ -957,7 +1125,7 @@ class MainWindow(QMainWindow):
                 self.resize(min(screen.width(), max(600, data["window_size"][0])), min(screen.height(), max(520, data["window_size"][1])))
             if "panel_sizes" in data:
                 self.coach_splitter.setSizes(data["panel_sizes"])
-            self.google_model.setCurrentText(data.get("google_model", ""))
+            self.google_model.setCurrentText(data.get("google_model") or "gemini-2.5-flash-lite")
             self.deepgram_model.setText(data.get("deepgram_model", "nova-3"))
             self.audio_language.setCurrentText(data.get("audio_language", "en"))
             self.protection.setChecked(data.get("capture_protection", True))
@@ -1045,6 +1213,10 @@ class MainWindow(QMainWindow):
         if "--latency-report" in sys.argv:
             print(self.latency.dumps(), flush=True)
         self.closed = True
+        self.render_timer.stop()
+        self.spec_timer.stop()
+        self.answer_viewport.removeEventFilter(self)
+        QApplication.instance().removeEventFilter(self.capture_filter)
         self.timer.stop()
         self.clock.stop()
         self.answer_cancel.set()

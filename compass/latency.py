@@ -56,7 +56,8 @@ class LatencyLog:
         return {"clock": "monotonic seconds", "p95_method": "nearest rank", "rolling_window": self.window,
                 "rolling": percentiles([self.first_words(t) for t in eligible[-self.window:]]),
                 "speculative_requests_cancelled": self.speculative_cancelled,
-                "requests": len(self.turns),
+                "requests_scheduled": len(self.turns),
+                "requests_sent": sum("request_sent" in t.stamps for t in self.turns),
                 "turns": [{"id": t.id, "source": t.source, "speculative": t.speculative,
                            "cancelled": t.cancelled, "timestamps": t.stamps,
                            "time_to_first_words_ms": self.first_words(t)} for t in self.turns]}

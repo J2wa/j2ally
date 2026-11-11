@@ -1,0 +1,714 @@
+{
+  "kind": "deterministic mocked timings; not a live latency claim",
+  "assumptions": "Deterministic mocked timing experiment. No keys, network, Qt or audio needed.\nRun from source root: python -m tools.latency_benchmark\nModels a complete question with a usable interim 80 ms after last speech,\nfinal arriving 500 ms after speech in both cases, cold TLS 180 ms, first body byte 300..680 ms,\nfirst text SSE event 80 ms later and a 40 ms UI repaint.\n",
+  "before": {
+    "clock": "monotonic seconds",
+    "p95_method": "nearest rank",
+    "rolling_window": 100,
+    "rolling": {
+      "count": 20,
+      "median_ms": 1740.0,
+      "p95_ms": 1910.0
+    },
+    "speculative_requests_cancelled": 0,
+    "requests_scheduled": 20,
+    "requests_sent": 20,
+    "turns": [
+      {
+        "id": 1,
+        "source": "audio",
+        "speculative": false,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 0.0,
+          "auto_triggered": 0.95,
+          "request_sent": 0.95,
+          "deepgram_final": 0.5,
+          "speech_final": 0.5,
+          "first_response_byte": 1.43,
+          "first_render": 1.55,
+          "answer_complete": 1.55
+        },
+        "time_to_first_words_ms": 1550.0
+      },
+      {
+        "id": 2,
+        "source": "audio",
+        "speculative": false,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 2.55,
+          "auto_triggered": 3.5,
+          "request_sent": 3.5,
+          "deepgram_final": 3.05,
+          "speech_final": 3.05,
+          "first_response_byte": 4.0,
+          "first_render": 4.12,
+          "answer_complete": 4.12
+        },
+        "time_to_first_words_ms": 1570.0000000000002
+      },
+      {
+        "id": 3,
+        "source": "audio",
+        "speculative": false,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 5.12,
+          "auto_triggered": 6.07,
+          "request_sent": 6.07,
+          "deepgram_final": 5.62,
+          "speech_final": 5.62,
+          "first_response_byte": 6.59,
+          "first_render": 6.71,
+          "answer_complete": 6.71
+        },
+        "time_to_first_words_ms": 1589.9999999999998
+      },
+      {
+        "id": 4,
+        "source": "audio",
+        "speculative": false,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 7.71,
+          "auto_triggered": 8.66,
+          "request_sent": 8.66,
+          "deepgram_final": 8.21,
+          "speech_final": 8.21,
+          "first_response_byte": 9.2,
+          "first_render": 9.319999999999999,
+          "answer_complete": 9.319999999999999
+        },
+        "time_to_first_words_ms": 1609.9999999999986
+      },
+      {
+        "id": 5,
+        "source": "audio",
+        "speculative": false,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 10.319999999999999,
+          "auto_triggered": 11.269999999999998,
+          "request_sent": 11.269999999999998,
+          "deepgram_final": 10.819999999999999,
+          "speech_final": 10.819999999999999,
+          "first_response_byte": 11.829999999999998,
+          "first_render": 11.949999999999998,
+          "answer_complete": 11.949999999999998
+        },
+        "time_to_first_words_ms": 1629.999999999999
+      },
+      {
+        "id": 6,
+        "source": "audio",
+        "speculative": false,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 12.949999999999998,
+          "auto_triggered": 13.899999999999997,
+          "request_sent": 13.899999999999997,
+          "deepgram_final": 13.449999999999998,
+          "speech_final": 13.449999999999998,
+          "first_response_byte": 14.479999999999997,
+          "first_render": 14.599999999999996,
+          "answer_complete": 14.599999999999996
+        },
+        "time_to_first_words_ms": 1649.9999999999986
+      },
+      {
+        "id": 7,
+        "source": "audio",
+        "speculative": false,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 15.599999999999996,
+          "auto_triggered": 16.549999999999994,
+          "request_sent": 16.549999999999994,
+          "deepgram_final": 16.099999999999994,
+          "speech_final": 16.099999999999994,
+          "first_response_byte": 17.149999999999995,
+          "first_render": 17.269999999999992,
+          "answer_complete": 17.269999999999992
+        },
+        "time_to_first_words_ms": 1669.9999999999964
+      },
+      {
+        "id": 8,
+        "source": "audio",
+        "speculative": false,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 18.269999999999992,
+          "auto_triggered": 19.21999999999999,
+          "request_sent": 19.21999999999999,
+          "deepgram_final": 18.769999999999992,
+          "speech_final": 18.769999999999992,
+          "first_response_byte": 19.839999999999993,
+          "first_render": 19.95999999999999,
+          "answer_complete": 19.95999999999999
+        },
+        "time_to_first_words_ms": 1689.9999999999977
+      },
+      {
+        "id": 9,
+        "source": "audio",
+        "speculative": false,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 20.95999999999999,
+          "auto_triggered": 21.90999999999999,
+          "request_sent": 21.90999999999999,
+          "deepgram_final": 21.45999999999999,
+          "speech_final": 21.45999999999999,
+          "first_response_byte": 22.54999999999999,
+          "first_render": 22.669999999999987,
+          "answer_complete": 22.669999999999987
+        },
+        "time_to_first_words_ms": 1709.9999999999973
+      },
+      {
+        "id": 10,
+        "source": "audio",
+        "speculative": false,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 23.669999999999987,
+          "auto_triggered": 24.619999999999987,
+          "request_sent": 24.619999999999987,
+          "deepgram_final": 24.169999999999987,
+          "speech_final": 24.169999999999987,
+          "first_response_byte": 25.279999999999987,
+          "first_render": 25.399999999999984,
+          "answer_complete": 25.399999999999984
+        },
+        "time_to_first_words_ms": 1729.9999999999968
+      },
+      {
+        "id": 11,
+        "source": "audio",
+        "speculative": false,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 26.399999999999984,
+          "auto_triggered": 27.349999999999984,
+          "request_sent": 27.349999999999984,
+          "deepgram_final": 26.899999999999984,
+          "speech_final": 26.899999999999984,
+          "first_response_byte": 28.029999999999983,
+          "first_render": 28.14999999999998,
+          "answer_complete": 28.14999999999998
+        },
+        "time_to_first_words_ms": 1749.9999999999964
+      },
+      {
+        "id": 12,
+        "source": "audio",
+        "speculative": false,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 29.14999999999998,
+          "auto_triggered": 30.09999999999998,
+          "request_sent": 30.09999999999998,
+          "deepgram_final": 29.64999999999998,
+          "speech_final": 29.64999999999998,
+          "first_response_byte": 30.79999999999998,
+          "first_render": 30.919999999999977,
+          "answer_complete": 30.919999999999977
+        },
+        "time_to_first_words_ms": 1769.999999999996
+      },
+      {
+        "id": 13,
+        "source": "audio",
+        "speculative": false,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 31.919999999999977,
+          "auto_triggered": 32.869999999999976,
+          "request_sent": 32.869999999999976,
+          "deepgram_final": 32.41999999999997,
+          "speech_final": 32.41999999999997,
+          "first_response_byte": 33.589999999999975,
+          "first_render": 33.70999999999997,
+          "answer_complete": 33.70999999999997
+        },
+        "time_to_first_words_ms": 1789.9999999999957
+      },
+      {
+        "id": 14,
+        "source": "audio",
+        "speculative": false,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 34.70999999999997,
+          "auto_triggered": 35.659999999999975,
+          "request_sent": 35.659999999999975,
+          "deepgram_final": 35.20999999999997,
+          "speech_final": 35.20999999999997,
+          "first_response_byte": 36.39999999999998,
+          "first_render": 36.519999999999975,
+          "answer_complete": 36.519999999999975
+        },
+        "time_to_first_words_ms": 1810.0000000000023
+      },
+      {
+        "id": 15,
+        "source": "audio",
+        "speculative": false,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 37.519999999999975,
+          "auto_triggered": 38.46999999999998,
+          "request_sent": 38.46999999999998,
+          "deepgram_final": 38.019999999999975,
+          "speech_final": 38.019999999999975,
+          "first_response_byte": 39.229999999999976,
+          "first_render": 39.34999999999997,
+          "answer_complete": 39.34999999999997
+        },
+        "time_to_first_words_ms": 1829.9999999999982
+      },
+      {
+        "id": 16,
+        "source": "audio",
+        "speculative": false,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 40.34999999999997,
+          "auto_triggered": 41.299999999999976,
+          "request_sent": 41.299999999999976,
+          "deepgram_final": 40.84999999999997,
+          "speech_final": 40.84999999999997,
+          "first_response_byte": 42.07999999999998,
+          "first_render": 42.199999999999974,
+          "answer_complete": 42.199999999999974
+        },
+        "time_to_first_words_ms": 1850.0000000000014
+      },
+      {
+        "id": 17,
+        "source": "audio",
+        "speculative": false,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 43.199999999999974,
+          "auto_triggered": 44.14999999999998,
+          "request_sent": 44.14999999999998,
+          "deepgram_final": 43.699999999999974,
+          "speech_final": 43.699999999999974,
+          "first_response_byte": 44.949999999999974,
+          "first_render": 45.06999999999997,
+          "answer_complete": 45.06999999999997
+        },
+        "time_to_first_words_ms": 1869.9999999999975
+      },
+      {
+        "id": 18,
+        "source": "audio",
+        "speculative": false,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 46.06999999999997,
+          "auto_triggered": 47.019999999999975,
+          "request_sent": 47.019999999999975,
+          "deepgram_final": 46.56999999999997,
+          "speech_final": 46.56999999999997,
+          "first_response_byte": 47.839999999999975,
+          "first_render": 47.95999999999997,
+          "answer_complete": 47.95999999999997
+        },
+        "time_to_first_words_ms": 1890.0000000000005
+      },
+      {
+        "id": 19,
+        "source": "audio",
+        "speculative": false,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 48.95999999999997,
+          "auto_triggered": 49.909999999999975,
+          "request_sent": 49.909999999999975,
+          "deepgram_final": 49.45999999999997,
+          "speech_final": 49.45999999999997,
+          "first_response_byte": 50.74999999999997,
+          "first_render": 50.86999999999997,
+          "answer_complete": 50.86999999999997
+        },
+        "time_to_first_words_ms": 1909.9999999999966
+      },
+      {
+        "id": 20,
+        "source": "audio",
+        "speculative": false,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 51.86999999999997,
+          "auto_triggered": 52.81999999999997,
+          "request_sent": 52.81999999999997,
+          "deepgram_final": 52.36999999999997,
+          "speech_final": 52.36999999999997,
+          "first_response_byte": 53.67999999999997,
+          "first_render": 53.79999999999997,
+          "answer_complete": 53.79999999999997
+        },
+        "time_to_first_words_ms": 1929.9999999999998
+      }
+    ]
+  },
+  "after_fast": {
+    "clock": "monotonic seconds",
+    "p95_method": "nearest rank",
+    "rolling_window": 100,
+    "rolling": {
+      "count": 20,
+      "median_ms": 970.0,
+      "p95_ms": 1140.0
+    },
+    "speculative_requests_cancelled": 0,
+    "requests_scheduled": 20,
+    "requests_sent": 20,
+    "turns": [
+      {
+        "id": 1,
+        "source": "audio",
+        "speculative": true,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 0.0,
+          "auto_triggered": 0.36000000000000004,
+          "request_sent": 0.36000000000000004,
+          "deepgram_final": 0.5,
+          "speech_final": 0.5,
+          "first_response_byte": 0.66,
+          "first_render": 0.78,
+          "answer_complete": 0.78
+        },
+        "time_to_first_words_ms": 780.0
+      },
+      {
+        "id": 2,
+        "source": "audio",
+        "speculative": true,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 1.78,
+          "auto_triggered": 2.14,
+          "request_sent": 2.14,
+          "deepgram_final": 2.2800000000000002,
+          "speech_final": 2.2800000000000002,
+          "first_response_byte": 2.46,
+          "first_render": 2.58,
+          "answer_complete": 2.58
+        },
+        "time_to_first_words_ms": 800.0
+      },
+      {
+        "id": 3,
+        "source": "audio",
+        "speculative": true,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 3.58,
+          "auto_triggered": 3.9400000000000004,
+          "request_sent": 3.9400000000000004,
+          "deepgram_final": 4.08,
+          "speech_final": 4.08,
+          "first_response_byte": 4.28,
+          "first_render": 4.4,
+          "answer_complete": 4.4
+        },
+        "time_to_first_words_ms": 820.0000000000002
+      },
+      {
+        "id": 4,
+        "source": "audio",
+        "speculative": true,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 5.4,
+          "auto_triggered": 5.760000000000001,
+          "request_sent": 5.760000000000001,
+          "deepgram_final": 5.9,
+          "speech_final": 5.9,
+          "first_response_byte": 6.120000000000001,
+          "first_render": 6.240000000000001,
+          "answer_complete": 6.240000000000001
+        },
+        "time_to_first_words_ms": 840.0000000000008
+      },
+      {
+        "id": 5,
+        "source": "audio",
+        "speculative": true,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 7.240000000000001,
+          "auto_triggered": 7.600000000000001,
+          "request_sent": 7.600000000000001,
+          "deepgram_final": 7.740000000000001,
+          "speech_final": 7.740000000000001,
+          "first_response_byte": 7.980000000000001,
+          "first_render": 8.1,
+          "answer_complete": 8.1
+        },
+        "time_to_first_words_ms": 859.9999999999985
+      },
+      {
+        "id": 6,
+        "source": "audio",
+        "speculative": true,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 9.1,
+          "auto_triggered": 9.459999999999999,
+          "request_sent": 9.459999999999999,
+          "deepgram_final": 9.6,
+          "speech_final": 9.6,
+          "first_response_byte": 9.86,
+          "first_render": 9.979999999999999,
+          "answer_complete": 9.979999999999999
+        },
+        "time_to_first_words_ms": 879.999999999999
+      },
+      {
+        "id": 7,
+        "source": "audio",
+        "speculative": true,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 10.979999999999999,
+          "auto_triggered": 11.339999999999998,
+          "request_sent": 11.339999999999998,
+          "deepgram_final": 11.479999999999999,
+          "speech_final": 11.479999999999999,
+          "first_response_byte": 11.759999999999998,
+          "first_render": 11.879999999999997,
+          "answer_complete": 11.879999999999997
+        },
+        "time_to_first_words_ms": 899.9999999999986
+      },
+      {
+        "id": 8,
+        "source": "audio",
+        "speculative": true,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 12.879999999999997,
+          "auto_triggered": 13.239999999999997,
+          "request_sent": 13.239999999999997,
+          "deepgram_final": 13.379999999999997,
+          "speech_final": 13.379999999999997,
+          "first_response_byte": 13.679999999999996,
+          "first_render": 13.799999999999995,
+          "answer_complete": 13.799999999999995
+        },
+        "time_to_first_words_ms": 919.9999999999982
+      },
+      {
+        "id": 9,
+        "source": "audio",
+        "speculative": true,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 14.799999999999995,
+          "auto_triggered": 15.159999999999995,
+          "request_sent": 15.159999999999995,
+          "deepgram_final": 15.299999999999995,
+          "speech_final": 15.299999999999995,
+          "first_response_byte": 15.619999999999994,
+          "first_render": 15.739999999999993,
+          "answer_complete": 15.739999999999993
+        },
+        "time_to_first_words_ms": 939.9999999999977
+      },
+      {
+        "id": 10,
+        "source": "audio",
+        "speculative": true,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 16.739999999999995,
+          "auto_triggered": 17.099999999999994,
+          "request_sent": 17.099999999999994,
+          "deepgram_final": 17.239999999999995,
+          "speech_final": 17.239999999999995,
+          "first_response_byte": 17.579999999999995,
+          "first_render": 17.699999999999992,
+          "answer_complete": 17.699999999999992
+        },
+        "time_to_first_words_ms": 959.9999999999973
+      },
+      {
+        "id": 11,
+        "source": "audio",
+        "speculative": true,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 18.699999999999992,
+          "auto_triggered": 19.05999999999999,
+          "request_sent": 19.05999999999999,
+          "deepgram_final": 19.199999999999992,
+          "speech_final": 19.199999999999992,
+          "first_response_byte": 19.55999999999999,
+          "first_render": 19.67999999999999,
+          "answer_complete": 19.67999999999999
+        },
+        "time_to_first_words_ms": 979.9999999999968
+      },
+      {
+        "id": 12,
+        "source": "audio",
+        "speculative": true,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 20.67999999999999,
+          "auto_triggered": 21.03999999999999,
+          "request_sent": 21.03999999999999,
+          "deepgram_final": 21.17999999999999,
+          "speech_final": 21.17999999999999,
+          "first_response_byte": 21.559999999999988,
+          "first_render": 21.679999999999986,
+          "answer_complete": 21.679999999999986
+        },
+        "time_to_first_words_ms": 999.9999999999965
+      },
+      {
+        "id": 13,
+        "source": "audio",
+        "speculative": true,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 22.679999999999986,
+          "auto_triggered": 23.039999999999985,
+          "request_sent": 23.039999999999985,
+          "deepgram_final": 23.179999999999986,
+          "speech_final": 23.179999999999986,
+          "first_response_byte": 23.579999999999984,
+          "first_render": 23.69999999999998,
+          "answer_complete": 23.69999999999998
+        },
+        "time_to_first_words_ms": 1019.999999999996
+      },
+      {
+        "id": 14,
+        "source": "audio",
+        "speculative": true,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 24.69999999999998,
+          "auto_triggered": 25.05999999999998,
+          "request_sent": 25.05999999999998,
+          "deepgram_final": 25.19999999999998,
+          "speech_final": 25.19999999999998,
+          "first_response_byte": 25.61999999999998,
+          "first_render": 25.739999999999977,
+          "answer_complete": 25.739999999999977
+        },
+        "time_to_first_words_ms": 1039.9999999999957
+      },
+      {
+        "id": 15,
+        "source": "audio",
+        "speculative": true,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 26.739999999999977,
+          "auto_triggered": 27.099999999999977,
+          "request_sent": 27.099999999999977,
+          "deepgram_final": 27.239999999999977,
+          "speech_final": 27.239999999999977,
+          "first_response_byte": 27.67999999999998,
+          "first_render": 27.799999999999976,
+          "answer_complete": 27.799999999999976
+        },
+        "time_to_first_words_ms": 1059.9999999999986
+      },
+      {
+        "id": 16,
+        "source": "audio",
+        "speculative": true,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 28.799999999999976,
+          "auto_triggered": 29.159999999999975,
+          "request_sent": 29.159999999999975,
+          "deepgram_final": 29.299999999999976,
+          "speech_final": 29.299999999999976,
+          "first_response_byte": 29.759999999999977,
+          "first_render": 29.879999999999974,
+          "answer_complete": 29.879999999999974
+        },
+        "time_to_first_words_ms": 1079.9999999999982
+      },
+      {
+        "id": 17,
+        "source": "audio",
+        "speculative": true,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 30.879999999999974,
+          "auto_triggered": 31.239999999999974,
+          "request_sent": 31.239999999999974,
+          "deepgram_final": 31.379999999999974,
+          "speech_final": 31.379999999999974,
+          "first_response_byte": 31.859999999999975,
+          "first_render": 31.979999999999972,
+          "answer_complete": 31.979999999999972
+        },
+        "time_to_first_words_ms": 1099.999999999998
+      },
+      {
+        "id": 18,
+        "source": "audio",
+        "speculative": true,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 32.979999999999976,
+          "auto_triggered": 33.339999999999975,
+          "request_sent": 33.339999999999975,
+          "deepgram_final": 33.479999999999976,
+          "speech_final": 33.479999999999976,
+          "first_response_byte": 33.979999999999976,
+          "first_render": 34.09999999999997,
+          "answer_complete": 34.09999999999997
+        },
+        "time_to_first_words_ms": 1119.9999999999975
+      },
+      {
+        "id": 19,
+        "source": "audio",
+        "speculative": true,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 35.09999999999997,
+          "auto_triggered": 35.45999999999997,
+          "request_sent": 35.45999999999997,
+          "deepgram_final": 35.59999999999997,
+          "speech_final": 35.59999999999997,
+          "first_response_byte": 36.11999999999997,
+          "first_render": 36.23999999999997,
+          "answer_complete": 36.23999999999997
+        },
+        "time_to_first_words_ms": 1139.9999999999934
+      },
+      {
+        "id": 20,
+        "source": "audio",
+        "speculative": true,
+        "cancelled": false,
+        "timestamps": {
+          "last_speech": 37.23999999999997,
+          "auto_triggered": 37.599999999999966,
+          "request_sent": 37.599999999999966,
+          "deepgram_final": 37.73999999999997,
+          "speech_final": 37.73999999999997,
+          "first_response_byte": 38.279999999999966,
+          "first_render": 38.39999999999996,
+          "answer_complete": 38.39999999999996
+        },
+        "time_to_first_words_ms": 1159.9999999999966
+      }
+    ]
+  }
+}

@@ -11,6 +11,7 @@ from urllib.parse import urlencode
 
 import websocket
 
+from .turns import SPEEDS
 from .core import ApiConfig, CoachError, Utterances
 
 
@@ -57,7 +58,7 @@ def deepgram_url(config: ApiConfig, device: dict) -> str:
         "model": config.deepgram_model, "language": config.language,
         "encoding": "linear16", "sample_rate": device["rate"],
         "channels": device["channels"], "smart_format": "true",
-        "interim_results": "true", "endpointing": 400,
+        "interim_results": "true", "endpointing": SPEEDS[config.speed][0],
         "utterance_end_ms": 1000, "vad_events": "true",
     })
 
@@ -155,13 +156,16 @@ class LiveSession:
                             raise CoachError("Deepgram disconnected. Stop and restart the session.")
                         break
                     event = json.loads(message)
-                    if event.get("is_final") or event.get("speech_final"):
-                        self.emit("timing", ("deepgram_final", time.monotonic()))
+                    for flag, stage in (("is_final", "deepgram_final"), ("speech_final", "speech_final")):
+                        if event.get(flag):
+                            self.emit("timing", (stage, time.monotonic()))
                     if event.get("type") == "Error":
                         raise CoachError("Deepgram rejected the stream. Check model and audio settings.")
                     if event.get("type") == "SpeechStarted":
                         self.emit("speaking", "")
                     final, interim, utterance = parser.accept(event)
+                    if interim:
+                        self.emit("hypothesis", " ".join(parser.pending + [interim]))
                     if final:
                         committed.append(final)
                         self.emit("final", final)

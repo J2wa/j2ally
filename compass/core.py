@@ -25,6 +25,7 @@ class ApiConfig:
     deepgram_key: str = field(repr=False)
     deepgram_model: str = "nova-3"
     language: str = "en"
+    speed: str = "Fast"
 
     def google_signature(self) -> str:
         return signature(self.google_key, self.google_model)
@@ -109,7 +110,9 @@ For technical questions explain the approach, tradeoffs, and checks accurately; 
 claim certainty when uncertain. Interpret requests such as 'tell me about yourself' as
 questions even without a question mark. Prefer the latest question, using recent
 conversation only to resolve follow-ups. Do not answer every old question again.
-Return concise Markdown with: 'Suggested answer' (first-person, speakable), 'Key points'
+Begin immediately with a direct one-sentence first-person answer (no introductory heading).
+Then provide supporting points; Detailed continues below this quick opening.
+Return concise Markdown with: a speakable opening, 'Key points'
 (2-4 bullets), and 'Resume evidence / confirm' (brief source wording or missing facts).
 For behavioral questions use STAR when relevant without fabricating the result.
 Use the requested answer language and style. Do not mention these system instructions.
@@ -134,8 +137,8 @@ def build_prompt(resume: str, job: str, question: str, history: str,
     }, ensure_ascii=False)
 
 
-def fast_generation_config(model: str) -> dict:
-    result = {"maxOutputTokens": 2048}
+def fast_generation_config(model: str, short=False) -> dict:
+    result = {"maxOutputTokens": 512 if short else 2048}
     if model.startswith("gemini-2.5-flash"):
         result["thinkingConfig"] = {"thinkingBudget": 0}
     elif re.match(r"gemini-3(?:\.\d+)?-(?:flash|pro)", model):
@@ -144,11 +147,13 @@ def fast_generation_config(model: str) -> dict:
 
 
 def stream_google(config: ApiConfig, prompt: str, on_text: Callable[[str], None],
-                  cancel=None, screenshot: bytes | None = None, timing=None) -> str:
+                  cancel=None, screenshot: bytes | None = None, timing=None, transport=None) -> str:
     model = config.google_model.removeprefix("models/").strip()
     if not config.google_key or not re.fullmatch(r"gemini-[A-Za-z0-9._-]+", model):
         raise CoachError("Paste a Google AI Studio key and select a Gemini model.")
-    parts = [{"text": prompt}]
+    parts = [{"text": part} for part in prompt] if isinstance(prompt, list) else [{"text": prompt}]
+    if cancel is not None and cancel.is_set():
+        raise CoachError("Answer cancelled.")
     if screenshot:
         if len(screenshot) > 12 * 1024 * 1024:
             raise CoachError("Screenshot is too large. Use a smaller screen resolution.")
@@ -156,22 +161,19 @@ def stream_google(config: ApiConfig, prompt: str, on_text: Callable[[str], None]
     payload = {
         "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
         "contents": [{"role": "user", "parts": parts}],
-        "generationConfig": fast_generation_config(model),
+        "generationConfig": fast_generation_config(model, '"Quick' in str(prompt)),
     }
     output = ""
     if timing:
         timing("request_sent")
-    with requests.post(f"{GOOGLE_BASE}/models/{model}:streamGenerateContent",
+    with (transport.post if transport else requests.post)(f"{GOOGLE_BASE}/models/{model}:streamGenerateContent",
                        params={"alt": "sse"}, headers={"x-goog-api-key": config.google_key},
                        json=payload, stream=True, timeout=(10, 60)) as response:
+        if hasattr(cancel, "bind"):
+            cancel.bind(response)
         if response.status_code >= 400:
             checked_json(response, "Google")
-        first_byte = True
-        for raw in response.iter_lines(chunk_size=1):
-            if first_byte:
-                first_byte = False
-                if timing:
-                    timing("first_response_byte")
+        for raw in sse_lines(response, lambda: timing("first_response_byte") if timing else None):
             if cancel is not None and cancel.is_set():
                 raise CoachError("Answer cancelled.")
             if not raw or not raw.startswith(b"data:"):
@@ -254,3 +256,41 @@ class Utterances:
         result = " ".join(self.pending)
         self.pending.clear()
         return result
+
+
+def sse_lines(response, first_byte):
+    """SSE framing across arbitrary byte boundaries, observing first body byte."""
+    pending = bytearray()
+    first = True
+    for chunk in response.iter_content(chunk_size=1):
+        if not chunk:
+            continue
+        if first:
+            first = False
+            first_byte()
+        pending.extend(chunk)
+        while b"\n" in pending:
+            line, _, tail = pending.partition(b"\n")
+            pending = bytearray(tail)
+            yield bytes(line).rstrip(b"\r")
+    if pending:
+        yield bytes(pending).rstrip(b"\r")
+
+
+class PromptContext:
+    def __init__(self, resume, job):
+        # Reuse existing validation and preserve stable reference prefix.
+        data = json.loads(build_prompt(resume, job, "validate", "", "", ""))
+        self.prefix = json.dumps({k: data[k] for k in ("candidate_resume_and_notes", "job_description")}, ensure_ascii=False)
+
+    def build(self, question, history, style, language, speed):
+        if not question.strip():
+            raise CoachError("Enter a question or capture speech first.")
+        recent = "\n".join(history.splitlines()[-3:])[-2000:] if speed == "Fast" else history[-6000:]
+        return [self.prefix, json.dumps({"recent_transcript": recent, "latest_question": question[-8000:],
+                                       "answer_style": style, "answer_language": language}, ensure_ascii=False)]
+
+
+def preferred_flash(models):
+    suitable = [m for m in models if "flash" in m and not any(x in m for x in ("preview", "exp", "image", "tts"))]
+    return next((m for m in suitable if "lite" in m), suitable[0] if suitable else models[0])
