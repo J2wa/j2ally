@@ -1,0 +1,25 @@
+name: Test and build Windows app
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: x64
+          cache: pip
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m pytest -q
+        env:
+          QT_QPA_PLATFORM: offscreen
+      - run: python -m PyInstaller --noconfirm --clean ALLY.spec
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ALLY-Windows-x64
+          path: dist/ALLY.exe
