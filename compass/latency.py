@@ -21,6 +21,7 @@ class TurnTiming:
     stamps: dict = field(default_factory=dict)
     cancelled: bool = False
     speculative: bool = False
+    attempts: list = field(default_factory=list)
 
 
 class LatencyLog:
@@ -57,9 +58,12 @@ class LatencyLog:
                 "rolling": percentiles([self.first_words(t) for t in eligible[-self.window:]]),
                 "speculative_requests_cancelled": self.speculative_cancelled,
                 "requests_scheduled": len(self.turns),
-                "requests_sent": sum("request_sent" in t.stamps for t in self.turns),
+                "requests_sent": sum(sum("request_sent" in a["timestamps"] for a in t.attempts)
+                                     if t.attempts else int("request_sent" in t.stamps) for t in self.turns),
+                "fallback_attempts_sent": sum("request_sent" in a["timestamps"]
+                                              for t in self.turns for a in t.attempts[1:]),
                 "turns": [{"id": t.id, "source": t.source, "speculative": t.speculative,
-                           "cancelled": t.cancelled, "timestamps": t.stamps,
+                           "cancelled": t.cancelled, "timestamps": t.stamps, "attempts": t.attempts,
                            "time_to_first_words_ms": self.first_words(t)} for t in self.turns]}
 
     def dumps(self):

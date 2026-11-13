@@ -18,6 +18,14 @@ class CoachError(Exception):
     """An actionable error that is safe to display after redaction."""
 
 
+class GenerationError(CoachError):
+    """Machine-readable failures; never expose provider response bodies."""
+
+    def __init__(self, message, kind="invalid_response", recoverable=True):
+        super().__init__(message)
+        self.kind, self.recoverable = kind, recoverable
+
+
 @dataclass(frozen=True)
 class ApiConfig:
     google_key: str = field(repr=False)
@@ -66,23 +74,41 @@ def checked_json(response: requests.Response, provider: str) -> dict:
             404: "The model is unavailable. Refresh the model list or change the model.",
             429: "Quota or rate limit reached. Check billing and try again later.",
         }.get(response.status_code, "The service is unavailable; try again later.")
-        raise CoachError(f"{provider}: HTTP {response.status_code}. {hint}")
+        status = response.status_code
+        terminal_key_error = False
+        try:
+            error = response.json().get("error", {})
+            terminal_key_error = isinstance(error, dict) and any(
+                isinstance(item, dict) and item.get("reason") in (
+                    "API_KEY_INVALID", "API_KEY_EXPIRED", "CONSUMER_INVALID", "SERVICE_DISABLED",
+                    "BILLING_DISABLED", "BILLING_NOT_ACTIVE") for item in error.get("details", []))
+        except (ValueError, AttributeError, TypeError):
+            pass
+        raise GenerationError(f"{provider}: HTTP {status}. {hint}", f"http_{status}",
+                              not terminal_key_error and (status in (400, 403, 404, 408, 429) or status >= 500))
     try:
         return response.json()
     except ValueError as exc:
         raise CoachError(f"{provider} returned an invalid response.") from exc
 
 
-def list_google_models(key: str) -> list[str]:
+def list_google_models(key: str, transport=None, cancel=None, timeout=(10, 30), max_pages=20) -> list[str]:
     if not key.strip():
         raise CoachError("Paste your Google AI Studio API key first.")
     models, page = [], None
     while True:
+        if cancel is not None and cancel.is_set():
+            raise CoachError("Model discovery cancelled.")
+        if max_pages <= 0:
+            break
+        max_pages -= 1
         params = {"pageSize": 1000}
         if page:
             params["pageToken"] = page
-        with requests.get(f"{GOOGLE_BASE}/models", headers={"x-goog-api-key": key},
-                          params=params, timeout=(10, 30)) as response:
+        with (transport.get if transport else requests.get)(f"{GOOGLE_BASE}/models", headers={"x-goog-api-key": key},
+                          params=params, timeout=timeout) as response:
+            if hasattr(cancel, "bind"):
+                cancel.bind(response)
             body = checked_json(response, "Google")
         for model in body.get("models", []):
             name = model.get("name", "").removeprefix("models/")
@@ -164,7 +190,8 @@ def quick_style(prompt):
 
 
 def stream_google(config: ApiConfig, prompt: str, on_text: Callable[[str], None],
-                  cancel=None, screenshot: bytes | None = None, timing=None, transport=None) -> str:
+                  cancel=None, screenshot: bytes | None = None, timing=None, transport=None,
+                  simple=False, strict=False, timeout=(10, 60)) -> str:
     model = config.google_model.removeprefix("models/").strip()
     if not config.google_key or not re.fullmatch(r"gemini-[A-Za-z0-9._-]+", model):
         raise CoachError("Paste a Google AI Studio key and select a Gemini model.")
@@ -180,13 +207,23 @@ def stream_google(config: ApiConfig, prompt: str, on_text: Callable[[str], None]
         "contents": [{"role": "user", "parts": parts}],
         "generationConfig": fast_generation_config(model, quick_style(prompt)),
     }
+    if simple:
+        payload["systemInstruction"]["parts"].append({"text":
+            "Recovery format overrides only the requested formatting/style: give a complete, "
+            "direct, speakable answer in 80–140 words. Headings, STAR, bullets and code are "
+            "optional. Keep the requested language and all truthfulness, uncertainty and "
+            "resume-evidence rules. Flag missing personal facts; never invent them."})
+        # Avoid repeating an unsupported thinking setting on another model.
+        payload["generationConfig"].pop("thinkingConfig", None)
+        payload["generationConfig"]["maxOutputTokens"] = max(8192, payload["generationConfig"]["maxOutputTokens"])
     output = ""
     truncated = False
+    stopped = False
     if timing:
         timing("request_sent")
     with (transport.post if transport else requests.post)(f"{GOOGLE_BASE}/models/{model}:streamGenerateContent",
                        params={"alt": "sse"}, headers={"x-goog-api-key": config.google_key},
-                       json=payload, stream=True, timeout=(10, 60)) as response:
+                       json=payload, stream=True, timeout=timeout) as response:
         if hasattr(cancel, "bind"):
             cancel.bind(response)
         if response.status_code >= 400:
@@ -198,26 +235,43 @@ def stream_google(config: ApiConfig, prompt: str, on_text: Callable[[str], None]
                 continue
             try:
                 event = json.loads(raw[5:].strip())
+                if not isinstance(event, dict) or not isinstance(event.get("candidates", []), list):
+                    raise ValueError("invalid event")
+                if not isinstance(event.get("promptFeedback", {}), dict):
+                    raise ValueError("invalid prompt feedback")
             except ValueError as exc:
-                raise CoachError("Google returned an unreadable stream. Try again.") from exc
+                raise GenerationError("Google returned an unreadable stream.") from exc
             if event.get("error"):
-                raise CoachError("Google returned a generation error. Check quota and model access.")
+                error = event["error"]
+                code = error.get("code") if isinstance(error, dict) else None
+                raise GenerationError("Google returned a generation error. Check quota and model access.",
+                                      f"http_{code}" if isinstance(code, int) else "provider_error",
+                                      code != 401)
             if event.get("promptFeedback", {}).get("blockReason"):
-                raise CoachError("Google blocked this prompt. Rephrase the question.")
+                raise GenerationError("Google blocked this prompt. Rephrase the question.", "blocked", False)
             for candidate in event.get("candidates", []):
-                for part in candidate.get("content", {}).get("parts", []):
-                    if not part.get("thought"):
-                        output += part.get("text", "")
+                try:
+                    for part in candidate.get("content", {}).get("parts", []):
+                        if not part.get("thought"):
+                            output += part.get("text", "")
+                except (AttributeError, TypeError) as exc:
+                    raise GenerationError("Google returned an unreadable answer.") from exc
+                stopped = stopped or candidate.get("finishReason") == "STOP"
                 if candidate.get("finishReason") == "MAX_TOKENS":
                     truncated = True
                 if candidate.get("finishReason") in ("SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT"):
-                    raise CoachError("Google stopped this answer. Rephrase the question.")
+                    raise GenerationError("Google stopped this answer. Rephrase the question.", "blocked", False)
             if output:
                 on_text(output)
-    if truncated and not output.strip():
-        raise CoachError("The model exhausted its output budget before returning an answer. No retry was made. Select a Flash model or try again manually.")
+    if cancel is not None and cancel.is_set():
+        raise CoachError("Answer cancelled.")
+    if truncated and (strict or not output.strip()):
+        detail = " before returning an answer" if not output.strip() else " before completing the answer"
+        raise GenerationError("The model exhausted its output budget" + detail + ". Select a Flash model or try again manually.", "output_limit")
     if not output.strip():
-        raise CoachError("Google returned no answer. Try a different model or shorter question.")
+        raise GenerationError("Google returned no answer. Try a different model or shorter question.", "empty")
+    if strict and not stopped:
+        raise GenerationError("The answer stream ended before completion.", "interrupted")
     if truncated:
         output += "\n\n*Incomplete answer: the model reached its output limit. No retry was made; regenerate manually or choose a Flash model.*"
         on_text(output)

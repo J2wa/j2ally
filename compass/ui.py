@@ -23,6 +23,7 @@ from .status import StatusStrip
 from .practice_ui import PracticePage
 from .turns import TurnGate, SPEEDS, adaptive_wait, is_question
 from .transport import Cancellation, GeminiTransport
+from .recovery import stream_with_fallback
 from .latency import LatencyLog
 from .audio import LiveSession, ContinuousSession, list_devices
 from .core import ApiConfig, CoachError, MAX_CONTEXT, Preflight, PromptContext, preferred_flash, build_prompt, list_google_models, read_context, safe_error, stream_google
@@ -123,6 +124,9 @@ class MainWindow(QMainWindow):
         self.confirmed = True
         self.held_result = None
         self.active_question = ""
+        self.recovery_partial = False
+        self.available_models = []
+        self.available_models_key = ""
         self.render_pending = None
         self.render_wait = None
         self.chunk_lock = threading.Lock()
@@ -175,6 +179,8 @@ class MainWindow(QMainWindow):
         self.latency_status = label("Time to first words: —", "muted")
         self.latency_status.setVisible(True)
         self.status_strip.layout().addWidget(self.latency_status)
+        self.recovery_status = label("Automatic fallback ready", "muted")
+        self.status_strip.layout().addWidget(self.recovery_status)
         self.statusBar().addPermanentWidget(button("Latency report", self.show_latency_report))
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.capture_filter = CaptureFilter(app, self.capture_status)
@@ -571,7 +577,7 @@ class MainWindow(QMainWindow):
         layout = section("Your context", "resume candidate notes job description import pdf docx profile")
         layout.addWidget(label("Import or edit the resume and role used by your coach."))
         layout.addWidget(button("Open Your context →", lambda: self.go(1)))
-        layout = section("Coaching", "response speed fast balanced careful auto coach answer style quick detailed language")
+        layout = section("Coaching", "response speed fast balanced careful auto coach answer style quick detailed language fallback recovery model quota")
         form = QFormLayout()
         for title, source in (("Response speed", self.speed), ("Answer style", self.style), ("Answer language", self.answer_language)):
             clone = QComboBox(); clone.addItems([source.itemText(i) for i in range(source.count())])
@@ -586,6 +592,13 @@ class MainWindow(QMainWindow):
         auto.setChecked(self.auto.isChecked())
         auto.toggled.connect(self.auto.setChecked); self.auto.toggled.connect(auto.setChecked)
         layout.addWidget(auto)
+        self.fallback_enabled = QCheckBox("Automatically recover failed answers with another model / simpler format")
+        self.fallback_enabled.setChecked(True)
+        self.fallback_enabled.setAccessibleName("Automatic answer fallback")
+        layout.addWidget(self.fallback_enabled)
+        layout.addWidget(label("Up to 3 sequential generation attempts per answer, within 45 seconds. "
+                               "Fallback can ignore the selected style, but keeps your language and resume-only facts. "
+                               "Extra attempts can be billable. Practice and connection tests stay single-request.", "muted"))
         layout.addWidget(label("These are the same coaching controls as Live coach; changes apply immediately.", "muted"))
         layout = section("Appearance", "theme dark light high contrast follow windows font type text size opacity compact mini bar layout stacked focus side by side animation")
         self.theme_choice = QComboBox(); self.theme_choice.addItems(["Follow Windows", "Light", "Dark", "High contrast"])
@@ -959,6 +972,7 @@ class MainWindow(QMainWindow):
         if name == "models":
             key, models = result
             if key == self.config().google_key:
+                self.available_models, self.available_models_key = list(models), key
                 previous = self.google_model.currentText()
                 self.google_model.clear()
                 self.google_model.addItems(models)
@@ -1046,6 +1060,19 @@ class MainWindow(QMainWindow):
         self.update_ready()
 
     def on_event(self, kind, value):
+        if kind == "answer_recovery":
+            epoch, info = value
+            if epoch != self.answer_epoch:
+                return
+            state = info["state"]
+            number, model = info["number"], info["model"]
+            mode = "simple answer" if info.get("simple_format") else "selected style"
+            self.recovery_partial = state == "partial"
+            self.recovery_status.setText(f"Attempt {number}/3 · {model} · {mode} · {state}")
+            if state == "requesting" and number > 1:
+                self.footer.setText(f"Recovering answer with {model} · formatting may differ")
+                self.status_strip.set_answer("waiting for fallback")
+            return
         if kind.startswith("test_"):
             if kind == "test_level":
                 self.test_meter.setValue(value)
@@ -1121,9 +1148,11 @@ class MainWindow(QMainWindow):
             _, question, answer = self.held_result
             self.held_result = None
             self.answers.append((question, answer))
-            self.answer_workspace.update_answer(self.answer_epoch, answer, "done")
-            self.status_strip.set_answer("done")
-            self.footer.setText("Answer ready · check the resume evidence before using it.")
+            state = "incomplete" if self.recovery_partial else "done"
+            self.answer_workspace.update_answer(self.answer_epoch, answer, state)
+            self.status_strip.set_answer(state)
+            self.footer.setText("Incomplete draft · fallback could not finish. Check before use." if self.recovery_partial
+                                else "Answer ready · check the resume evidence before using it.")
             self.show_latency_status()
 
     def queue_render(self, epoch, text):
@@ -1265,6 +1294,7 @@ class MainWindow(QMainWindow):
             self.status_strip.show_error(str(exc), "Your context")
             return
         self.speculative, self.confirmed = speculative, not speculative
+        self.recovery_partial = False
         self.held_result = None
         self.active_question = question
         self.turn_timing = self.latency.new("audio" if automatic else "manual", speculative)
@@ -1276,6 +1306,9 @@ class MainWindow(QMainWindow):
         self.answer_cancel = Cancellation()
         cancel = self.answer_cancel
         config, timing = self.config(), self.turn_timing
+        fallback_enabled = self.fallback_enabled.isChecked()
+        models = tuple(self.available_models) if self.available_models_key == config.google_key else ()
+        self.recovery_status.setText("Automatic fallback ready" if fallback_enabled else "Automatic fallback off")
         self.answer_workspace.begin(epoch, question, self.selected_turn if self.selected_turn is not None else (len(self.transcript_view.turns) - 1 if self.transcript_view.turns else None))
         self.answer_workspace.entries[-1].timing = self.turn_timing
         self.status_strip.set_answer("waiting")
@@ -1285,9 +1318,12 @@ class MainWindow(QMainWindow):
         self.update_ready()
         def work():
             try:
-                answer = stream_google(config, prompt, lambda text: self.queue_render(epoch, text), cancel,
+                answer = stream_with_fallback(config, prompt, lambda text: self.queue_render(epoch, text), cancel,
                                        screenshot=screenshot, transport=self.transport,
-                                       timing=lambda stage: self.latency.mark(timing, stage))
+                                       timing=lambda stage: self.latency.mark(timing, stage),
+                                       enabled=fallback_enabled, models=models, attempts=timing.attempts,
+                                       stream=stream_google,
+                                       progress=lambda info: self.bus.event.emit("answer_recovery", (epoch, info)))
                 if not self.closed:
                     self.bus.done.emit(f"answer:{epoch}", (epoch, question, answer))
             except Exception as exc:
@@ -1502,6 +1538,7 @@ class MainWindow(QMainWindow):
                     "opacity": self.opacity.value(), "answer_font": self.answer_font.value(),
                     "layout_mode": self.layout_mode.currentIndex(), "panel_sizes": self.coach_splitter.sizes(),
                     "window_size": self.normal_window_size(), "response_speed": self.speed.currentText(),
+                    "automatic_answer_fallback": self.fallback_enabled.isChecked(),
                     "shell_mode": self.shell_mode, "shell_geometries": dict(self.shell_geometries, **{self.shell_mode: [self.x(),self.y(),self.width(),self.height()]}),
                     "overlay_accent": self.overlay_accent.currentText(), "shortcuts": self.shortcut_map,
                     "theme": self.theme_choice.currentText(), "font_family": self.font_choice.currentFont().family(),
@@ -1539,6 +1576,7 @@ class MainWindow(QMainWindow):
             self.answer_workspace.key_first.setChecked(bool(data.get("key_points_first", True)))
             self.on_top.setChecked(bool(data.get("always_on_top", False)))
             self.speed.setCurrentText(data.get("response_speed", "Fast"))
+            self.fallback_enabled.setChecked(bool(data.get("automatic_answer_fallback", True)))
             self.opacity.setValue(max(25, min(100, int(data.get("opacity", 100)))))
             self.answer_font.setValue(max(16, min(32, int(data.get("answer_font", 22)))))
             self.layout_mode.setCurrentIndex(max(0, min(3, int(data.get("layout_mode", 0)))))

@@ -34,6 +34,92 @@ def seed(window):
     window.job.setPlainText("Role requires Python.")
 
 
+def test_fallback_enabled_by_default_and_persisted(window):
+    assert window.fallback_enabled.isChecked()
+    window.fallback_enabled.setChecked(False)
+    window.save_settings()
+    assert json.loads(window.config_path.read_text())["automatic_answer_fallback"] is False
+    window.fallback_enabled.setChecked(True)
+    window.load_settings()
+    assert not window.fallback_enabled.isChecked()
+
+
+def test_fallback_updates_one_history_entry_and_stale_status_ignored(window, app, monkeypatch):
+    from compass.core import GenerationError
+    seed(window)
+    window.available_models = ["gemini-3.5-flash-lite"]
+    window.available_models_key = "g-key"
+    calls = []
+    def stream(config, prompt, on_text, cancel, **kwargs):
+        calls.append(config.google_model)
+        if len(calls) == 1:
+            on_text("old draft")
+            raise GenerationError("cutoff", "output_limit")
+        assert kwargs["simple"]
+        on_text("Complete recovered answer")
+        return "Complete recovered answer"
+    monkeypatch.setattr("compass.ui.stream_google", stream)
+    window.generate("Explain your experience")
+    pump(app, lambda: "answer" not in window.busy)
+    assert calls == ["gemini-test", "gemini-3.5-flash-lite"]
+    assert len(window.answer_workspace.entries) == len(window.answers) == 1
+    assert window.answer_workspace.entries[0].text == "Complete recovered answer"
+    assert "gemini-3.5-flash-lite" in window.recovery_status.text()
+    status = window.recovery_status.text()
+    window.on_event("answer_recovery", (window.answer_epoch - 1,
+                    {"state": "failed", "number": 3, "model": "stale"}))
+    assert window.recovery_status.text() == status
+
+
+def test_cancel_during_fallback_frees_slot_and_no_more_models(window, app, monkeypatch):
+    import threading
+    from compass.core import GenerationError
+    seed(window)
+    window.available_models = ["gemini-3.5-flash-lite", "gemini-3.8-flash"]
+    window.available_models_key = "g-key"
+    entered, release, finished = threading.Event(), threading.Event(), threading.Event()
+    calls = []
+    def stream(config, prompt, on_text, cancel, **kwargs):
+        calls.append(config.google_model)
+        if len(calls) == 1:
+            raise GenerationError("model error")
+        entered.set()
+        release.wait(2)
+        try:
+            on_text("late fallback text")
+        finally:
+            finished.set()
+        return "late fallback text"
+    monkeypatch.setattr("compass.ui.stream_google", stream)
+    window.generate("Question?")
+    pump(app, entered.is_set)
+    try:
+        window.cancel_answer()
+        assert "answer" not in window.busy and window.ask_btn.isEnabled()
+    finally:
+        release.set()
+    pump(app, finished.is_set)
+    app.processEvents()
+    assert len(calls) == 2 and not window.answers
+    assert "late fallback" not in window.answer_view.toPlainText()
+
+
+def test_exhausted_partial_draft_marked_incomplete_in_ui(window, app, monkeypatch):
+    from compass.core import GenerationError
+    seed(window)
+    window.available_models = ["gemini-3.5-flash-lite", "gemini-3.8-flash"]
+    window.available_models_key = "g-key"
+    def stream(config, prompt, on_text, cancel, **kwargs):
+        on_text("A partial draft")
+        raise GenerationError("cutoff", "output_limit")
+    monkeypatch.setattr("compass.ui.stream_google", stream)
+    window.generate("Question?")
+    pump(app, lambda: "answer" not in window.busy)
+    assert len(window.answers) == 1
+    assert window.answer_workspace.entries[0].state == "incomplete"
+    assert "Incomplete draft" in window.footer.text()
+
+
 def test_context_consent_and_single_audio_check(window, app, monkeypatch):
     seed(window)
     assert not window.start_btn.isEnabled()

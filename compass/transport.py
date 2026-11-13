@@ -41,6 +41,10 @@ class GeminiTransport:
         self.last_used = self.clock()
         return self.session.post(*args, **kwargs)
 
+    def get(self, *args, **kwargs):
+        self.last_used = self.clock()
+        return self.session.get(*args, **kwargs)
+
     def prewarm(self):
         with self.lock:
             if self.warming or self.clock() - self.last_used < 45:

@@ -230,6 +230,10 @@ class OverlayView(QWidget):
         error = not o.status_strip.banner.isHidden()
         state = entry.state if entry else 'idle'
         status = o.status_strip.error.text() if error else 'Streaming...' if active else 'Answer complete. Check it before you use it.' if state == 'done' else 'Answer cancelled.' if state == 'cancelled' else 'Waiting for end of question' if listening else 'Ready.'
+        if not error and active and o.fallback_enabled.isChecked():
+            status = o.recovery_status.text()
+        elif not error and state == 'incomplete':
+            status = 'Incomplete draft. Fallback could not finish; check before use.'
         self.status.setText(status + (' · '+badge if self.compact and badge else ''))
         self.fix.setVisible(error)
         self.hint.setChecked(o.style.currentIndex()==2); self.explain.setChecked(o.style.currentIndex()==1)

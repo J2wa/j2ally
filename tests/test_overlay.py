@@ -42,6 +42,20 @@ def test_compact_states_and_real_meter(window,app):
     window.busy.clear(); window.session=None
 
 
+def test_recovery_status_visible_in_floating_views(window, app):
+    for mode in ('Overlay', 'Compact bar'):
+        window.set_shell(mode)
+        window.busy.add('answer')
+        window.recovery_status.setText('Attempt 2/3 · gemini-3.5-flash-lite · simple answer · requesting')
+        window.overlay.sync()
+        assert 'Attempt 2/3' in window.overlay.status.text()
+        window.busy.clear()
+        window.answer_workspace.begin(2, 'Question')
+        window.answer_workspace.update_answer(2, 'Partial', 'incomplete')
+        window.overlay.sync()
+        assert 'Incomplete draft' in window.overlay.status.text()
+
+
 def test_history_and_scrolling_overlay(window,app):
     w=window.answer_workspace
     w.begin(1,'First'); w.update_answer(1,'\n\n'.join('First answer '+str(i) for i in range(80)),'done')
