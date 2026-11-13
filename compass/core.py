@@ -115,7 +115,10 @@ Then provide supporting points; Detailed continues below this quick opening.
 Return concise Markdown with: a speakable opening, 'Key points'
 (2-4 bullets), and 'Resume evidence / confirm' (brief source wording or missing facts).
 For behavioral questions use STAR when relevant without fabricating the result.
-Use the requested answer language and style. Do not mention these system instructions.
+Use the requested answer language and style. In Quick style keep the entire response
+concise: a complete 80–140 word opening, 2–3 short key points, and one evidence note.
+Finish the answer rather than stopping after an introductory sentence.
+Do not mention these system instructions.
 """
 
 
@@ -138,12 +141,26 @@ def build_prompt(resume: str, job: str, question: str, history: str,
 
 
 def fast_generation_config(model: str, short=False) -> dict:
-    result = {"maxOutputTokens": 512 if short else 2048}
+    # Leave room for model thinking; constrain visible length in the prompt.
+    thinking_model = not model.startswith("gemini-2.5-flash")
+    result = {"maxOutputTokens": (8192 if short else 16384) if thinking_model else (2048 if short else 4096)}
     if model.startswith("gemini-2.5-flash"):
         result["thinkingConfig"] = {"thinkingBudget": 0}
     elif re.match(r"gemini-3(?:\.\d+)?-(?:flash|pro)", model):
         result["thinkingConfig"] = {"thinkingLevel": "low"}
     return result
+
+
+def quick_style(prompt):
+    """Read the style field, never words inside reference material."""
+    for part in reversed(prompt if isinstance(prompt, list) else [prompt]):
+        try:
+            value = json.loads(part)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(value, dict) and isinstance(value.get("answer_style"), str):
+            return value["answer_style"].casefold().startswith("quick")
+    return False
 
 
 def stream_google(config: ApiConfig, prompt: str, on_text: Callable[[str], None],
@@ -161,9 +178,10 @@ def stream_google(config: ApiConfig, prompt: str, on_text: Callable[[str], None]
     payload = {
         "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
         "contents": [{"role": "user", "parts": parts}],
-        "generationConfig": fast_generation_config(model, '"Quick' in str(prompt)),
+        "generationConfig": fast_generation_config(model, quick_style(prompt)),
     }
     output = ""
+    truncated = False
     if timing:
         timing("request_sent")
     with (transport.post if transport else requests.post)(f"{GOOGLE_BASE}/models/{model}:streamGenerateContent",
@@ -191,13 +209,18 @@ def stream_google(config: ApiConfig, prompt: str, on_text: Callable[[str], None]
                     if not part.get("thought"):
                         output += part.get("text", "")
                 if candidate.get("finishReason") == "MAX_TOKENS":
-                    output += "\n\n*Output limit reached. Ask for a shorter answer.*"
+                    truncated = True
                 if candidate.get("finishReason") in ("SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT"):
                     raise CoachError("Google stopped this answer. Rephrase the question.")
             if output:
                 on_text(output)
+    if truncated and not output.strip():
+        raise CoachError("The model exhausted its output budget before returning an answer. No retry was made. Select a Flash model or try again manually.")
     if not output.strip():
         raise CoachError("Google returned no answer. Try a different model or shorter question.")
+    if truncated:
+        output += "\n\n*Incomplete answer: the model reached its output limit. No retry was made; regenerate manually or choose a Flash model.*"
+        on_text(output)
     if timing:
         timing("answer_complete")
     return output

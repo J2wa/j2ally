@@ -74,7 +74,7 @@ def test_cancel_generation(monkeypatch, config):
 
 def test_token_limit_visible(monkeypatch, config):
     monkeypatch.setattr("compass.core.requests.post", lambda *_a, **_k: Response(lines=[event("Partial", finishReason="MAX_TOKENS")]))
-    assert "Output limit reached" in stream_google(config, "q", lambda _: None)
+    assert "Incomplete answer" in stream_google(config, "q", lambda _: None)
 
 
 @pytest.mark.parametrize("status", [400, 401, 403, 404, 429, 503])
@@ -206,3 +206,31 @@ def test_low_latency_config_is_model_specific():
     assert fast_generation_config('gemini-3.8-flash')['thinkingConfig'] == {'thinkingLevel': 'low'}
     assert 'thinkingConfig' not in fast_generation_config('gemini-2.5-pro')
     assert 'thinkingConfig' not in fast_generation_config('gemini-future')
+
+
+def test_budget_allows_thinking_and_style_is_structured():
+    from compass.core import fast_generation_config, quick_style, PromptContext
+    assert fast_generation_config('gemini-2.5-flash-lite', True)['maxOutputTokens'] == 2048
+    assert fast_generation_config('gemini-3.5-flash-lite', True)['maxOutputTokens'] == 8192
+    assert fast_generation_config('gemini-3.5-flash-lite', False)['maxOutputTokens'] == 16384
+    assert not quick_style(build_prompt('"Quick"', 'role', '"Quick"', '', 'Detailed', 'English'))
+    assert quick_style(PromptContext('resume','role').build('q','','Quick: direct answer','English','Fast'))
+
+
+def test_thinking_only_cutoff_is_error_without_retry(monkeypatch, config):
+    calls=[]
+    def post(*args, **kwargs):
+        calls.append(kwargs)
+        return Response(lines=[event('', finishReason='MAX_TOKENS')])
+    monkeypatch.setattr('compass.core.requests.post',post)
+    with pytest.raises(CoachError, match='before returning an answer'):
+        stream_google(config,'q',lambda _: pytest.fail('No visible answer'))
+    assert len(calls)==1
+
+
+def test_partial_cutoff_preserved_with_one_notice(monkeypatch,config):
+    monkeypatch.setattr('compass.core.requests.post',lambda *a,**kw:Response(lines=[event('Partial'),event('',finishReason='MAX_TOKENS'),event('',finishReason='MAX_TOKENS')]))
+    chunks=[]
+    result=stream_google(config,'q',chunks.append)
+    assert result.startswith('Partial') and result.count('Incomplete answer')==1
+    assert chunks[-1]==result
