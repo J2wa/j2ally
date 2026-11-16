@@ -221,9 +221,9 @@ class AnswerWorkspace(QWidget):
         self.history.blockSignals(True)
         self.history.addItem(question[:70])
         self.history.blockSignals(False)
-        # Preserve whichever answer the user is reading, including its scroll position.
-        if self.selected < 0 or self.entries[self.selected].state == 'cancelled':
-            self.select(len(self.entries) - 1)
+        # Follow the current interview question; select() saves the previous reading
+        # position so history remains available without another click for new answers.
+        self.select(len(self.entries) - 1)
         self.refresh_controls()
 
     def update_answer(self, epoch, text, state="streaming"):

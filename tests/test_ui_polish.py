@@ -53,23 +53,32 @@ def test_view_presets_preferences_and_restore(window, app):
         w.closed = True; w.close()
 
 
-def test_answer_history_keeps_reader_position_and_new_stream(app):
+def test_new_question_automatically_selects_stream_and_keeps_history(app):
     workspace = AnswerWorkspace()
     workspace.resize(900, 500); workspace.show(); app.processEvents()
     workspace.begin(1, 'First question', 0)
     workspace.update_answer(1, 'First **answer**', 'done')
     workspace.begin(2, 'Second question', 1)
     workspace.update_answer(2, 'Second answer', 'streaming')
-    assert workspace.selected == 0
-    assert 'First answer' in workspace.browser.toPlainText()
-    assert workspace.jump_latest.isVisible()
-    workspace.latest()
     assert workspace.selected == 1 and 'Second answer' in workspace.browser.toPlainText()
+    assert workspace.history.currentIndex() == 1
+    assert 'Second question' in workspace.context.text()
+    assert workspace.browser.follow
+    assert not workspace.jump_latest.isVisible()
     workspace.previous.click()
     assert workspace.selected == 0
     workspace.next.click()
     assert workspace.selected == 1
     workspace.history.setCurrentIndex(0)
+    workspace.browser.pause()
+    workspace.begin(3, 'Third question', 2)
+    workspace.update_answer(3, 'Third answer', 'streaming')
+    assert workspace.selected == 2 and workspace.browser.follow
+    assert 'Third answer' in workspace.browser.toPlainText()
+    workspace.history.setCurrentIndex(0)
+    assert not workspace.browser.follow  # earlier reading state is retained
+    workspace.update_answer(3, 'Third answer continues')
+    assert 'First answer' in workspace.browser.toPlainText()  # manual review works
     workspace.cancel(2, discard=True)
     assert 'First answer' in workspace.browser.toPlainText()
     workspace.close()

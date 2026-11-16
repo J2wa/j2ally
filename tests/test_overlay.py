@@ -43,15 +43,15 @@ def test_compact_states_and_real_meter(window,app):
 
 
 def test_recovery_status_visible_in_floating_views(window, app):
-    for mode in ('Overlay', 'Compact bar'):
+    for epoch, mode in enumerate(('Overlay', 'Compact bar'), start=1):
         window.set_shell(mode)
         window.busy.add('answer')
         window.recovery_status.setText('Attempt 2/3 · gemini-3.5-flash-lite · simple answer · requesting')
         window.overlay.sync()
         assert 'Attempt 2/3' in window.overlay.status.text()
         window.busy.clear()
-        window.answer_workspace.begin(2, 'Question')
-        window.answer_workspace.update_answer(2, 'Partial', 'incomplete')
+        window.answer_workspace.begin(epoch, 'Question')
+        window.answer_workspace.update_answer(epoch, 'Partial', 'incomplete')
         window.overlay.sync()
         assert 'Incomplete draft' in window.overlay.status.text()
 
@@ -63,9 +63,23 @@ def test_history_and_scrolling_overlay(window,app):
     bar=o.browser.verticalScrollBar(); bar.setValue(bar.maximum()//3)
     assert not o.browser.follow
     w.begin(2,'Second'); w.update_answer(2,'Second response'); o.sync()
-    assert 'First answer' in o.browser.toPlainText() and not o.browser.follow
-    o.jump_latest(); assert 'Second response' in o.browser.toPlainText()
+    assert 'Second response' in o.browser.toPlainText() and o.browser.follow
+    assert o.question.text() == 'Question: Second'
+    assert o.counter.text() == 'Answer 2 of 2'
     o.navigate(-1); assert 'First answer' in o.browser.toPlainText()
+    o.jump_latest(); assert 'Second response' in o.browser.toPlainText()
+
+
+def test_compact_bar_follows_new_question_without_clicks(window, app):
+    w = window.answer_workspace
+    w.begin(1, 'First'); w.update_answer(1, 'First answer', 'done')
+    window.set_shell('Compact bar')
+    window.overlay.sync()
+    w.begin(2, 'Latest question'); w.update_answer(2, 'Latest answer')
+    window.overlay.sync()
+    assert w.selected == 1 and window.overlay.browser.follow
+    assert 'Latest answer' in window.overlay.browser.toPlainText()
+    assert 'Latest question' in window.overlay.counter.text()
 
 
 def test_shortcuts_remapping_local_and_conflicts(window):
